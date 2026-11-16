@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
 import { CATEGORIES } from '../data/seedData';
 import {
@@ -9,12 +9,20 @@ import {
   RecurrenceType,
 } from '../types/lifehq';
 import { useLifeHQ } from '../context/LifeHQContext';
+import { getAvailableWindowFrom } from '../utils/calendarLayout';
+import {
+  getIsoWeekday,
+  minutesToTime,
+  timeToMinutes,
+} from '../utils/dateUtils';
+import { expandEventsForRange } from '../utils/recurrence';
 
 interface EventModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultDate: string;
   defaultStartTime?: string;
+  defaultEndTime?: string;
   editingOccurrence?: EventOccurrence | null;
 }
 
@@ -33,6 +41,7 @@ export const EventModal: React.FC<EventModalProps> = ({
   onClose,
   defaultDate,
   defaultStartTime = '17:00',
+  defaultEndTime,
   editingOccurrence,
 }) => {
   const { state, upsertEvent, deleteEvent, editOccurrenceException } =
@@ -45,6 +54,10 @@ export const EventModal: React.FC<EventModalProps> = ({
   const isRecurringMaster = Boolean(
     masterEvent && masterEvent.recurrence !== 'once'
   );
+
+  const computedDefaultEnd =
+    defaultEndTime ??
+    minutesToTime(Math.min(23 * 60 + 59, timeToMinutes(defaultStartTime) + 60));
 
   const [editScope, setEditScope] = useState<'occurrence' | 'series'>(
     isRecurringMaster ? 'occurrence' : 'series'
@@ -61,7 +74,7 @@ export const EventModal: React.FC<EventModalProps> = ({
     editingOccurrence?.startTime ?? defaultStartTime
   );
   const [endTime, setEndTime] = useState(
-    editingOccurrence?.endTime ?? '18:00'
+    editingOccurrence?.endTime ?? computedDefaultEnd
   );
   const [commitmentStatus, setCommitmentStatus] = useState<CommitmentStatus>(
     editingOccurrence?.commitmentStatus ?? 'confirmed'
@@ -73,7 +86,7 @@ export const EventModal: React.FC<EventModalProps> = ({
     masterEvent?.weekAB ?? 'both'
   );
   const [daysOfWeek, setDaysOfWeek] = useState<number[]>(
-    masterEvent?.daysOfWeek ?? [1]
+    masterEvent?.daysOfWeek ?? [getIsoWeekday(defaultDate)]
   );
   const [nth, setNth] = useState<number>(masterEvent?.nth ?? 3);
   const [weekday, setWeekday] = useState<number>(masterEvent?.weekday ?? 7);
@@ -89,6 +102,25 @@ export const EventModal: React.FC<EventModalProps> = ({
     Boolean(masterEvent?.isSchoolTimetable)
   );
   const [validationErr, setValidationErr] = useState<string | null>(null);
+
+  const availableWindow = useMemo(() => {
+    if (!date || !startTime) return null;
+    const dayOccs = expandEventsForRange(
+      state.events,
+      date,
+      date,
+      state.settings,
+      state.activityRecords
+    ).filter((occ) => occ.occurrenceKey !== editingOccurrence?.occurrenceKey);
+    return getAvailableWindowFrom(dayOccs, timeToMinutes(startTime));
+  }, [
+    date,
+    startTime,
+    state.events,
+    state.settings,
+    state.activityRecords,
+    editingOccurrence?.occurrenceKey,
+  ]);
 
   if (!isOpen) return null;
 
@@ -330,6 +362,25 @@ export const EventModal: React.FC<EventModalProps> = ({
               />
             </div>
           </div>
+
+          {!editingOccurrence && availableWindow && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200/70 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+              <span className="font-mono tabular-nums">
+                {availableWindow.summaryText}
+              </span>
+              {availableWindow.nextCommitment &&
+                availableWindow.availableMinutes >= 10 &&
+                endTime !== availableWindow.untilTime && (
+                  <button
+                    type="button"
+                    onClick={() => setEndTime(availableWindow.untilTime)}
+                    className="font-medium text-slate-900 dark:text-white underline underline-offset-2 hover:opacity-80"
+                  >
+                    Use until {availableWindow.untilTime}
+                  </button>
+                )}
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
