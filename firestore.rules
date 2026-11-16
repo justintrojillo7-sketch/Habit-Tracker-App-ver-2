@@ -1,0 +1,314 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isVerifiedUser() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidCategory(cat) {
+      return cat in ['teaching', 'behold', 'fitness', 'faith', 'personal', 'rest'];
+    }
+
+    function isValidDateStr(d) {
+      return d is string && d.size() == 10 && d.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isValidTimeStr(t) {
+      return t is string && t.size() == 5 && t.matches('^\\d{2}:\\d{2}$');
+    }
+
+    function isValidWorkspace(data, userId) {
+      return data.keys().hasAll(['ownerId', 'theme', 'weekAnchorMonday', 'weekAnchorType', 'targetBedtime', 'notificationsEnabled', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'theme', 'weekAnchorMonday', 'weekAnchorType', 'weekOverrides', 'schoolHolidays', 'targetBedtime', 'notificationsEnabled', 'reminderOptions', 'categoryColours', 'updatedAt'])
+        && data.ownerId == userId
+        && data.theme in ['system', 'light', 'dark']
+        && isValidDateStr(data.weekAnchorMonday)
+        && data.weekAnchorType in ['A', 'B']
+        && isValidTimeStr(data.targetBedtime)
+        && data.notificationsEnabled is bool
+        && data.updatedAt is string && data.updatedAt.size() <= 40
+        && (!('weekOverrides' in data) || data.weekOverrides is map)
+        && (!('schoolHolidays' in data) || (data.schoolHolidays is list && data.schoolHolidays.size() <= 60))
+        && (!('reminderOptions' in data) || data.reminderOptions is map)
+        && (!('categoryColours' in data) || data.categoryColours is map);
+    }
+
+    function isValidEvent(data, userId, eventId) {
+      return data.keys().hasAll(['ownerId', 'id', 'title', 'category', 'subcategory', 'startDate', 'startTime', 'endTime', 'recurrence', 'commitmentStatus', 'source'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'category', 'subcategory', 'startDate', 'endDate', 'startTime', 'endTime', 'recurrence', 'daysOfWeek', 'weekAB', 'nth', 'weekday', 'customIntervalDays', 'commitmentStatus', 'source', 'isSchoolTimetable', 'isRoutineMarker', 'isFlexible', 'durationUnconfirmed', 'location', 'notes', 'reminderMinutes', 'linkedHabitId', 'linkedMonthlyRole', 'exceptions', 'icsUid'])
+        && data.ownerId == userId
+        && data.id == eventId
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && isValidCategory(data.category)
+        && data.subcategory is string && data.subcategory.size() >= 1 && data.subcategory.size() <= 80
+        && isValidDateStr(data.startDate)
+        && (!('endDate' in data) || isValidDateStr(data.endDate))
+        && isValidTimeStr(data.startTime)
+        && isValidTimeStr(data.endTime)
+        && data.recurrence in ['once', 'daily', 'weekly', 'fortnightly', 'monthly', 'nthWeekday', 'wednesdayBeforeThirdSunday', 'custom']
+        && data.commitmentStatus in ['confirmed', 'tentative', 'proposed']
+        && data.source in ['school', 'routine', 'personal', 'ics-import']
+        && (!('daysOfWeek' in data) || (data.daysOfWeek is list && data.daysOfWeek.size() <= 7))
+        && (!('weekAB' in data) || data.weekAB in ['A', 'B', 'both'])
+        && (!('nth' in data) || (data.nth is int && data.nth >= 1 && data.nth <= 5))
+        && (!('weekday' in data) || (data.weekday is int && data.weekday >= 1 && data.weekday <= 7))
+        && (!('customIntervalDays' in data) || (data.customIntervalDays is int && data.customIntervalDays >= 1 && data.customIntervalDays <= 365))
+        && (!('isSchoolTimetable' in data) || data.isSchoolTimetable is bool)
+        && (!('isRoutineMarker' in data) || data.isRoutineMarker is bool)
+        && (!('isFlexible' in data) || data.isFlexible is bool)
+        && (!('durationUnconfirmed' in data) || data.durationUnconfirmed is bool)
+        && (!('location' in data) || (data.location is string && data.location.size() <= 200))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!('reminderMinutes' in data) || data.reminderMinutes == null || (data.reminderMinutes is int && data.reminderMinutes >= 0 && data.reminderMinutes <= 10080))
+        && (!('linkedHabitId' in data) || (data.linkedHabitId is string && data.linkedHabitId.size() <= 128))
+        && (!('linkedMonthlyRole' in data) || data.linkedMonthlyRole is map)
+        && (!('exceptions' in data) || data.exceptions is map)
+        && (!('icsUid' in data) || (data.icsUid is string && data.icsUid.size() <= 256));
+    }
+
+    function isValidActivityRecord(data, userId, recordId) {
+      return data.keys().hasAll(['ownerId', 'id', 'sourceType', 'date', 'startTime', 'endTime', 'actualMinutes', 'status', 'category', 'subcategory', 'title', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'sourceType', 'eventId', 'occurrenceDate', 'date', 'startTime', 'endTime', 'scheduledMinutes', 'actualMinutes', 'status', 'category', 'subcategory', 'title', 'project', 'notes', 'isDemoData', 'createdAt', 'updatedAt'])
+        && data.ownerId == userId
+        && data.id == recordId
+        && data.sourceType in ['scheduled', 'timer', 'manual']
+        && isValidDateStr(data.date)
+        && isValidTimeStr(data.startTime)
+        && isValidTimeStr(data.endTime)
+        && data.actualMinutes is number && data.actualMinutes >= 0 && data.actualMinutes <= 1440
+        && data.status in ['completed', 'partial', 'skipped', 'cancelled', 'rescheduled']
+        && isValidCategory(data.category)
+        && data.subcategory is string && data.subcategory.size() >= 1 && data.subcategory.size() <= 80
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.createdAt is string && data.createdAt.size() <= 40
+        && data.updatedAt is string && data.updatedAt.size() <= 40
+        && (!('eventId' in data) || (data.eventId is string && data.eventId.size() <= 128))
+        && (!('occurrenceDate' in data) || isValidDateStr(data.occurrenceDate))
+        && (!('scheduledMinutes' in data) || (data.scheduledMinutes is number && data.scheduledMinutes >= 0 && data.scheduledMinutes <= 1440))
+        && (!('project' in data) || (data.project is string && data.project.size() <= 120))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && (!('isDemoData' in data) || data.isDemoData is bool);
+    }
+
+    function isValidPriority(data, userId, priorityId) {
+      return data.keys().hasAll(['ownerId', 'id', 'title', 'category', 'date', 'completed', 'createdAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'category', 'date', 'completed', 'notes', 'createdAt'])
+        && data.ownerId == userId
+        && data.id == priorityId
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && isValidCategory(data.category)
+        && isValidDateStr(data.date)
+        && data.completed is bool
+        && data.createdAt is string && data.createdAt.size() <= 40
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    function isValidHabit(data, userId, habitId) {
+      return data.keys().hasAll(['ownerId', 'id', 'title', 'category', 'frequency', 'weeklyTarget', 'paused'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'category', 'frequency', 'weeklyTarget', 'paused', 'notes'])
+        && data.ownerId == userId
+        && data.id == habitId
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && isValidCategory(data.category)
+        && data.frequency in ['daily', 'weekly', 'custom']
+        && data.weeklyTarget is int && data.weeklyTarget >= 1 && data.weeklyTarget <= 14
+        && data.paused is bool
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    function isValidHabitLog(data, userId, logId) {
+      return data.keys().hasAll(['ownerId', 'id', 'habitId', 'date', 'status'])
+        && data.keys().hasOnly(['ownerId', 'id', 'habitId', 'date', 'status', 'source'])
+        && data.ownerId == userId
+        && data.id == logId
+        && data.habitId is string && data.habitId.size() >= 1 && data.habitId.size() <= 128
+        && isValidDateStr(data.date)
+        && data.status in ['done', 'skipped']
+        && (!('source' in data) || data.source in ['manual', 'calendar']);
+    }
+
+    function isValidGoal(data, userId, goalId) {
+      return data.keys().hasAll(['ownerId', 'id', 'title', 'description', 'category', 'progressMode', 'manualProgress', 'status', 'milestones'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'description', 'category', 'targetDate', 'measurableTarget', 'progressMode', 'manualProgress', 'targetHours', 'status', 'milestones', 'linkedActivityKeyword'])
+        && data.ownerId == userId
+        && data.id == goalId
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 1000
+        && isValidCategory(data.category)
+        && data.progressMode in ['milestones', 'manual', 'hours']
+        && data.manualProgress is number && data.manualProgress >= 0 && data.manualProgress <= 100
+        && data.status in ['active', 'completed', 'paused']
+        && data.milestones is list && data.milestones.size() <= 30
+        && (!('targetDate' in data) || isValidDateStr(data.targetDate))
+        && (!('measurableTarget' in data) || (data.measurableTarget is string && data.measurableTarget.size() <= 200))
+        && (!('targetHours' in data) || (data.targetHours is number && data.targetHours >= 0 && data.targetHours <= 10000))
+        && (!('linkedActivityKeyword' in data) || (data.linkedActivityKeyword is string && data.linkedActivityKeyword.size() <= 120));
+    }
+
+    function isValidWeeklyReview(data, userId, reviewId) {
+      return data.keys().hasAll(['ownerId', 'weekMonday', 'wentWell', 'difficultOrDraining', 'changeNextWeek', 'savedAt'])
+        && data.keys().hasOnly(['ownerId', 'weekMonday', 'wentWell', 'difficultOrDraining', 'changeNextWeek', 'savedAt'])
+        && data.ownerId == userId
+        && data.weekMonday == reviewId
+        && isValidDateStr(data.weekMonday)
+        && data.wentWell is string && data.wentWell.size() <= 2000
+        && data.difficultOrDraining is string && data.difficultOrDraining.size() <= 2000
+        && data.changeNextWeek is string && data.changeNextWeek.size() <= 2000
+        && data.savedAt is string && data.savedAt.size() <= 40;
+    }
+
+    function isValidActiveTimer(data, userId) {
+      return data.keys().hasAll(['ownerId', 'id', 'isRunning', 'accumulatedMs', 'category', 'subcategory', 'title', 'project', 'notes'])
+        && data.keys().hasOnly(['ownerId', 'id', 'isRunning', 'startedAtMs', 'accumulatedMs', 'category', 'subcategory', 'title', 'project', 'notes', 'linkedEventId', 'linkedOccurrenceDate'])
+        && data.ownerId == userId
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128
+        && data.isRunning is bool
+        && (!('startedAtMs' in data) || data.startedAtMs == null || data.startedAtMs is number)
+        && data.accumulatedMs is number && data.accumulatedMs >= 0
+        && isValidCategory(data.category)
+        && data.subcategory is string && data.subcategory.size() <= 80
+        && data.title is string && data.title.size() <= 200
+        && data.project is string && data.project.size() <= 120
+        && data.notes is string && data.notes.size() <= 1000
+        && (!('linkedEventId' in data) || (data.linkedEventId is string && data.linkedEventId.size() <= 128))
+        && (!('linkedOccurrenceDate' in data) || isValidDateStr(data.linkedOccurrenceDate));
+    }
+
+    // Connection probe document (read-only ping)
+    match /test/connection {
+      allow get: if true;
+    }
+
+    // User workspace root
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow create: if isValidId(userId) && isOwner(userId) && isValidWorkspace(incoming(), userId);
+      allow update: if isValidId(userId) && isOwner(userId)
+        && isValidWorkspace(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().diff(existing()).affectedKeys().hasOnly(['theme', 'weekAnchorMonday', 'weekAnchorType', 'weekOverrides', 'schoolHolidays', 'targetBedtime', 'notificationsEnabled', 'reminderOptions', 'categoryColours', 'updatedAt']);
+      allow delete: if false;
+
+      match /events/{eventId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(eventId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(eventId) && isOwner(userId) && isValidEvent(incoming(), userId, eventId);
+        allow update: if isValidId(eventId) && isOwner(userId)
+          && isValidEvent(incoming(), userId, eventId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'subcategory', 'startDate', 'endDate', 'startTime', 'endTime', 'recurrence', 'daysOfWeek', 'weekAB', 'nth', 'weekday', 'customIntervalDays', 'commitmentStatus', 'source', 'isSchoolTimetable', 'isRoutineMarker', 'isFlexible', 'durationUnconfirmed', 'location', 'notes', 'reminderMinutes', 'linkedHabitId', 'linkedMonthlyRole', 'exceptions', 'icsUid']);
+        allow delete: if isValidId(eventId) && isOwner(userId);
+      }
+
+      match /activityRecords/{recordId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(recordId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(recordId) && isOwner(userId) && isValidActivityRecord(incoming(), userId, recordId);
+        allow update: if isValidId(recordId) && isOwner(userId)
+          && isValidActivityRecord(incoming(), userId, recordId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'startTime', 'endTime', 'scheduledMinutes', 'actualMinutes', 'status', 'category', 'subcategory', 'title', 'project', 'notes', 'updatedAt']);
+        allow delete: if isValidId(recordId) && isOwner(userId);
+      }
+
+      match /priorities/{priorityId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(priorityId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(priorityId) && isOwner(userId) && isValidPriority(incoming(), userId, priorityId);
+        allow update: if isValidId(priorityId) && isOwner(userId)
+          && isValidPriority(incoming(), userId, priorityId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().createdAt == existing().createdAt
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'date', 'completed', 'notes']);
+        allow delete: if isValidId(priorityId) && isOwner(userId);
+      }
+
+      match /habits/{habitId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(habitId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(habitId) && isOwner(userId) && isValidHabit(incoming(), userId, habitId);
+        allow update: if isValidId(habitId) && isOwner(userId)
+          && isValidHabit(incoming(), userId, habitId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'frequency', 'weeklyTarget', 'paused', 'notes']);
+        allow delete: if isValidId(habitId) && isOwner(userId);
+      }
+
+      match /habitLogs/{logId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(logId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(logId) && isOwner(userId) && isValidHabitLog(incoming(), userId, logId);
+        allow update: if isValidId(logId) && isOwner(userId)
+          && isValidHabitLog(incoming(), userId, logId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'source']);
+        allow delete: if isValidId(logId) && isOwner(userId);
+      }
+
+      match /goals/{goalId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(goalId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(goalId) && isOwner(userId) && isValidGoal(incoming(), userId, goalId);
+        allow update: if isValidId(goalId) && isOwner(userId)
+          && isValidGoal(incoming(), userId, goalId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'category', 'targetDate', 'measurableTarget', 'progressMode', 'manualProgress', 'targetHours', 'status', 'milestones', 'linkedActivityKeyword']);
+        allow delete: if isValidId(goalId) && isOwner(userId);
+      }
+
+      match /weeklyReviews/{reviewId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(reviewId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(reviewId) && isOwner(userId) && isValidWeeklyReview(incoming(), userId, reviewId);
+        allow update: if isValidId(reviewId) && isOwner(userId)
+          && isValidWeeklyReview(incoming(), userId, reviewId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().weekMonday == existing().weekMonday
+          && incoming().diff(existing()).affectedKeys().hasOnly(['wentWell', 'difficultOrDraining', 'changeNextWeek', 'savedAt']);
+        allow delete: if isValidId(reviewId) && isOwner(userId);
+      }
+
+      match /runtime/{runtimeId} {
+        allow get: if runtimeId == 'activeTimer' && isOwner(userId);
+        allow create: if runtimeId == 'activeTimer' && isOwner(userId) && isValidActiveTimer(incoming(), userId);
+        allow update: if runtimeId == 'activeTimer' && isOwner(userId)
+          && isValidActiveTimer(incoming(), userId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['id', 'isRunning', 'startedAtMs', 'accumulatedMs', 'category', 'subcategory', 'title', 'project', 'notes', 'linkedEventId', 'linkedOccurrenceDate']);
+        allow delete: if runtimeId == 'activeTimer' && isOwner(userId);
+      }
+    }
+  }
+}

@@ -1,0 +1,225 @@
+{
+  "entities": {
+    "UserWorkspace": {
+      "title": "UserWorkspace",
+      "description": "User preferences, Week A/B anchor configuration, school holidays, and category colour settings.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "theme": { "type": "string", "enum": ["system", "light", "dark"] },
+        "weekAnchorMonday": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "weekAnchorType": { "type": "string", "enum": ["A", "B"] },
+        "weekOverrides": { "type": "object" },
+        "schoolHolidays": { "type": "array" },
+        "targetBedtime": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "notificationsEnabled": { "type": "boolean" },
+        "reminderOptions": { "type": "object" },
+        "categoryColours": { "type": "object" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "theme", "weekAnchorMonday", "weekAnchorType", "targetBedtime", "notificationsEnabled", "updatedAt"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "Recurring or one-off calendar event with Week A/B, commitment status, and per-occurrence exceptions.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": { "type": "string", "enum": ["teaching", "behold", "fitness", "faith", "personal", "rest"] },
+        "subcategory": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "startDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "endDate": { "type": "string", "maxLength": 10 },
+        "startTime": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "endTime": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "recurrence": { "type": "string", "enum": ["once", "daily", "weekly", "fortnightly", "monthly", "nthWeekday", "wednesdayBeforeThirdSunday", "custom"] },
+        "daysOfWeek": { "type": "array" },
+        "weekAB": { "type": "string", "enum": ["A", "B", "both"] },
+        "nth": { "type": "number" },
+        "weekday": { "type": "number" },
+        "customIntervalDays": { "type": "number" },
+        "commitmentStatus": { "type": "string", "enum": ["confirmed", "tentative", "proposed"] },
+        "source": { "type": "string", "enum": ["school", "routine", "personal", "ics-import"] },
+        "isSchoolTimetable": { "type": "boolean" },
+        "isRoutineMarker": { "type": "boolean" },
+        "isFlexible": { "type": "boolean" },
+        "durationUnconfirmed": { "type": "boolean" },
+        "location": { "type": "string", "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "reminderMinutes": { "type": "number" },
+        "linkedHabitId": { "type": "string", "maxLength": 128 },
+        "linkedMonthlyRole": { "type": "object" },
+        "exceptions": { "type": "object" },
+        "icsUid": { "type": "string", "maxLength": 256 }
+      },
+      "required": ["ownerId", "id", "title", "category", "subcategory", "startDate", "startTime", "endTime", "recurrence", "commitmentStatus", "source"]
+    },
+    "ActivityRecord": {
+      "title": "ActivityRecord",
+      "description": "Confirmed scheduled activity, timer session, or manual time log entry.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sourceType": { "type": "string", "enum": ["scheduled", "timer", "manual"] },
+        "eventId": { "type": "string", "maxLength": 128 },
+        "occurrenceDate": { "type": "string", "maxLength": 10 },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "startTime": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "endTime": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "scheduledMinutes": { "type": "number" },
+        "actualMinutes": { "type": "number" },
+        "status": { "type": "string", "enum": ["completed", "partial", "skipped", "cancelled", "rescheduled"] },
+        "category": { "type": "string", "enum": ["teaching", "behold", "fitness", "faith", "personal", "rest"] },
+        "subcategory": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "project": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "isDemoData": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 40 },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "id", "sourceType", "date", "startTime", "endTime", "actualMinutes", "status", "category", "subcategory", "title", "createdAt", "updatedAt"]
+    },
+    "PriorityTask": {
+      "title": "PriorityTask",
+      "description": "Daily priority task (up to 3 per day).",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "category": { "type": "string", "enum": ["teaching", "behold", "fitness", "faith", "personal", "rest"] },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "completed": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "id", "title", "category", "date", "completed", "createdAt"]
+    },
+    "Habit": {
+      "title": "Habit",
+      "description": "Low-friction habit definition.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "category": { "type": "string", "enum": ["teaching", "behold", "fitness", "faith", "personal", "rest"] },
+        "frequency": { "type": "string", "enum": ["daily", "weekly", "custom"] },
+        "weeklyTarget": { "type": "number" },
+        "paused": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["ownerId", "id", "title", "category", "frequency", "weeklyTarget", "paused"]
+    },
+    "HabitLog": {
+      "title": "HabitLog",
+      "description": "Daily habit completion or excused skip log.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "habitId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "status": { "type": "string", "enum": ["done", "skipped"] },
+        "source": { "type": "string", "enum": ["manual", "calendar"] }
+      },
+      "required": ["ownerId", "id", "habitId", "date", "status"]
+    },
+    "Goal": {
+      "title": "Goal",
+      "description": "Life category goal with milestones and measurable output tracking.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 1000 },
+        "category": { "type": "string", "enum": ["teaching", "behold", "fitness", "faith", "personal", "rest"] },
+        "targetDate": { "type": "string", "maxLength": 10 },
+        "measurableTarget": { "type": "string", "maxLength": 200 },
+        "progressMode": { "type": "string", "enum": ["milestones", "manual", "hours"] },
+        "manualProgress": { "type": "number" },
+        "targetHours": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "completed", "paused"] },
+        "milestones": { "type": "array" },
+        "linkedActivityKeyword": { "type": "string", "maxLength": 120 }
+      },
+      "required": ["ownerId", "id", "title", "description", "category", "progressMode", "manualProgress", "status", "milestones"]
+    },
+    "WeeklyReviewEntry": {
+      "title": "WeeklyReviewEntry",
+      "description": "Five-minute Sunday reflection responses keyed by week Monday.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "weekMonday": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "wentWell": { "type": "string", "maxLength": 2000 },
+        "difficultOrDraining": { "type": "string", "maxLength": 2000 },
+        "changeNextWeek": { "type": "string", "maxLength": 2000 },
+        "savedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "weekMonday", "wentWell", "difficultOrDraining", "changeNextWeek", "savedAt"]
+    },
+    "ActiveTimerState": {
+      "title": "ActiveTimerState",
+      "description": "Persisted active stopwatch timer state across browser refreshes and devices.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "isRunning": { "type": "boolean" },
+        "startedAtMs": { "type": "number" },
+        "accumulatedMs": { "type": "number" },
+        "category": { "type": "string", "enum": ["teaching", "behold", "fitness", "faith", "personal", "rest"] },
+        "subcategory": { "type": "string", "maxLength": 80 },
+        "title": { "type": "string", "maxLength": 200 },
+        "project": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "linkedEventId": { "type": "string", "maxLength": 128 },
+        "linkedOccurrenceDate": { "type": "string", "maxLength": 10 }
+      },
+      "required": ["ownerId", "id", "isRunning", "accumulatedMs", "category", "subcategory", "title", "project", "notes"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserWorkspace" },
+      "description": "User workspace settings and Week A/B configuration."
+    },
+    "/users/{userId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "User's calendar events."
+    },
+    "/users/{userId}/activityRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/ActivityRecord" },
+      "description": "Confirmed scheduled activities, timer sessions, and manual time logs."
+    },
+    "/users/{userId}/priorities/{priorityId}": {
+      "schema": { "$ref": "#/entities/PriorityTask" },
+      "description": "User's daily priority tasks."
+    },
+    "/users/{userId}/habits/{habitId}": {
+      "schema": { "$ref": "#/entities/Habit" },
+      "description": "User's habit definitions."
+    },
+    "/users/{userId}/habitLogs/{logId}": {
+      "schema": { "$ref": "#/entities/HabitLog" },
+      "description": "Daily habit completion and skip records."
+    },
+    "/users/{userId}/goals/{goalId}": {
+      "schema": { "$ref": "#/entities/Goal" },
+      "description": "User's goals and milestones."
+    },
+    "/users/{userId}/weeklyReviews/{reviewId}": {
+      "schema": { "$ref": "#/entities/WeeklyReviewEntry" },
+      "description": "Sunday weekly reflection entries."
+    },
+    "/users/{userId}/runtime/{runtimeId}": {
+      "schema": { "$ref": "#/entities/ActiveTimerState" },
+      "description": "Active stopwatch timer persistence."
+    }
+  }
+}

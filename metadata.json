@@ -1,0 +1,6 @@
+{
+  "name": "LifeHQ",
+  "description": "A low-friction personal life operating system for teaching, videography, fitness, faith and ministry, personal commitments, and rest.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
