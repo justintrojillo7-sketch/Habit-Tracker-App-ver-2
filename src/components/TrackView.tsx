@@ -1,28 +1,39 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ArrowRight,
   Check,
   Clock,
   Pause,
   Play,
   Plus,
+  ShieldCheck,
   SkipForward,
+  Sparkles,
   Square,
   Trash2,
   X,
 } from 'lucide-react';
 import { CATEGORIES } from '../data/seedData';
 import { useLifeHQ } from '../context/LifeHQContext';
-import { CategoryId, HabitFrequency } from '../types/lifehq';
+import { CategoryId, Habit, HabitFrequency } from '../types/lifehq';
 import {
   addDays,
   formatDuration,
   formatShortDate,
   formatStopwatch,
-  getMondayOfWeek,
-  getWeekDates,
   minutesToTime,
   timeToMinutes,
 } from '../utils/dateUtils';
+import {
+  calculateAggregateHabitSummary,
+  formatHabitScheduleLabel,
+  formatHabitStackText,
+  formatPreferredWindow,
+  getEffectiveHabitLog,
+  isHabitScheduledOnDate,
+  isHabitStarterEligible,
+} from '../utils/habitUtils';
+import { TwoMinuteStarterModal } from './TwoMinuteStarterModal';
 
 type TrackTab = 'timer' | 'habits' | 'history';
 
@@ -30,6 +41,7 @@ export const TrackView: React.FC = () => {
   const {
     state,
     now,
+    setActiveSection,
     getCategoryMeta,
     startTimer,
     pauseTimer,
@@ -47,10 +59,10 @@ export const TrackView: React.FC = () => {
   const [tab, setTab] = useState<TrackTab>('timer');
 
   // Timer form state
-  const [timerCategory, setTimerCategory] = useState<CategoryId>('behold');
-  const [timerSubcategory, setTimerSubcategory] = useState('Editing');
-  const [timerTitle, setTimerTitle] = useState('Video editing');
-  const [timerProject, setTimerProject] = useState('Portfolio Film');
+  const [timerCategory, setTimerCategory] = useState<CategoryId>('teaching');
+  const [timerSubcategory, setTimerSubcategory] = useState('Core work');
+  const [timerTitle, setTimerTitle] = useState('');
+  const [timerProject, setTimerProject] = useState('');
   const [timerNotes, setTimerNotes] = useState('');
   const [elapsedMs, setElapsedMs] = useState(0);
   const [stopAdjustOpen, setStopAdjustOpen] = useState(false);
@@ -76,6 +88,7 @@ export const TrackView: React.FC = () => {
   const [newHabitCat, setNewHabitCat] = useState<CategoryId>('personal');
   const [newHabitFreq, setNewHabitFreq] = useState<HabitFrequency>('weekly');
   const [newHabitTarget, setNewHabitTarget] = useState(3);
+  const [starterHabit, setStarterHabit] = useState<Habit | null>(null);
 
   useEffect(() => {
     const t = state.activeTimer;
@@ -143,12 +156,29 @@ export const TrackView: React.FC = () => {
     setManualDuration(preset.mins);
   };
 
-  // Habit week dates & consistency calculations
-  const weekMonday = getMondayOfWeek(now.date);
-  const weekDates = useMemo(() => getWeekDates(weekMonday), [weekMonday]);
+  // Habit trailing 14-day dates & fair consistency calculations
   const trailing14Dates = useMemo(
     () => Array.from({ length: 14 }, (_, i) => addDays(now.date, -13 + i)),
     [now.date]
+  );
+  const habitSummary = useMemo(
+    () =>
+      calculateAggregateHabitSummary(
+        state.habits,
+        now.date,
+        state.habitLogs,
+        state.events,
+        state.settings,
+        state.activityRecords
+      ),
+    [
+      state.habits,
+      now.date,
+      state.habitLogs,
+      state.events,
+      state.settings,
+      state.activityRecords,
+    ]
   );
 
   const handleAddHabitSubmit = (e: React.FormEvent) => {
@@ -357,7 +387,7 @@ export const TrackView: React.FC = () => {
                     required
                     value={timerTitle}
                     onChange={(e) => setTimerTitle(e.target.value)}
-                    placeholder="e.g. Video editing, Marking Year 8..."
+                    placeholder="e.g. Deep work session, Project planning..."
                     className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm"
                   />
                 </div>
@@ -371,7 +401,7 @@ export const TrackView: React.FC = () => {
                       type="text"
                       value={timerProject}
                       onChange={(e) => setTimerProject(e.target.value)}
-                      placeholder="Portfolio Film"
+                      placeholder="Project name"
                       className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm"
                     />
                   </div>
@@ -422,7 +452,7 @@ export const TrackView: React.FC = () => {
                   label: 'Commute 35m',
                   cat: 'personal' as CategoryId,
                   sub: 'Commuting',
-                  title: 'School commute',
+                  title: 'Commute',
                   start: '08:00',
                   mins: 35,
                 },
@@ -435,10 +465,10 @@ export const TrackView: React.FC = () => {
                   mins: 45,
                 },
                 {
-                  label: 'Behold Edit 90m',
+                  label: 'Focus Block 90m',
                   cat: 'behold' as CategoryId,
-                  sub: 'Editing',
-                  title: 'Video editing',
+                  sub: 'Practice',
+                  title: 'Focused creative block',
                   start: '17:15',
                   mins: 90,
                 },
@@ -578,17 +608,26 @@ export const TrackView: React.FC = () => {
       {/* TAB 2: LOW-FRICTION HABIT TRACKER */}
       {tab === 'habits' && (
         <div className="space-y-5">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Excused skips and paused habits never penalise your consistency.
+              Excused days and paused habits never penalise consistency.
               Confirmed calendar blocks fulfil linked habits automatically.
             </p>
-            <button
-              onClick={() => setShowAddHabit((v) => !v)}
-              className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-nowrap"
-            >
-              <Plus className="w-4 h-4" /> New habit
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveSection('habits')}
+                className="inline-flex items-center gap-1 min-h-[40px] px-3 rounded-xl text-xs font-medium border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 whitespace-nowrap"
+              >
+                Open full Habits <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setShowAddHabit((v) => !v)}
+                className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-nowrap"
+              >
+                <Plus className="w-4 h-4" /> New habit
+              </button>
+            </div>
           </div>
 
           {showAddHabit && (
@@ -646,161 +685,209 @@ export const TrackView: React.FC = () => {
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {state.habits.map((habit) => {
-              const cat = getCategoryMeta(habit.category);
-              const todayLog = state.habitLogs.find(
-                (l) => l.habitId === habit.id && l.date === now.date
-              );
-              const weekDone = weekDates.filter((d) =>
-                state.habitLogs.some(
-                  (l) =>
-                    l.habitId === habit.id && l.date === d && l.status === 'done'
-                )
-              ).length;
-              const weekSkipped = weekDates.filter((d) =>
-                state.habitLogs.some(
-                  (l) =>
-                    l.habitId === habit.id &&
-                    l.date === d &&
-                    l.status === 'skipped'
-                )
-              ).length;
+            {state.habits
+              .filter((h) => !h.archived)
+              .map((habit) => {
+                const cat = getCategoryMeta(habit.category);
+                const st = habitSummary.statsById.get(habit.id);
+                const todayLog = st?.todayLog ?? null;
+                const todayStarter = st?.todayStarterAttempt ?? null;
+                const stackText = formatHabitStackText(habit, state.events);
+                const preferredWindow = formatPreferredWindow(habit);
+                const starterEligible = isHabitStarterEligible(habit, todayLog);
+                const weekCredits = st?.weekCredits ?? 0;
+                const weekTarget = st?.weekEffectiveTarget ?? habit.weeklyTarget;
+                const consistency = st?.consistency7d ?? null;
 
-              const eligibleTarget = habit.paused
-                ? 0
-                : Math.max(1, habit.weeklyTarget - weekSkipped);
-              const consistency = habit.paused
-                ? null
-                : Math.min(100, Math.round((weekDone / eligibleTarget) * 100));
-
-              return (
-                <div
-                  key={habit.id}
-                  className={`rounded-2xl bg-white dark:bg-[#141b29] border border-slate-200/80 dark:border-slate-800/80 p-5 space-y-4 ${
-                    habit.paused ? 'opacity-65' : ''
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        <span
-                          className="inline-block w-2 h-2 rounded-sm mr-1.5"
-                          style={{ backgroundColor: cat.colour }}
-                        />
-                        {cat.label} · {habit.frequency} · Target{' '}
-                        <span className="font-mono tabular-nums">
-                          {habit.weeklyTarget}/wk
-                        </span>
-                      </p>
-                      <h3 className="text-base font-semibold mt-0.5">
-                        {habit.title}
-                      </h3>
-                      {habit.notes && (
-                        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                          {habit.notes}
+                return (
+                  <div
+                    key={habit.id}
+                    className={`rounded-2xl bg-white dark:bg-[#141b29] border border-slate-200/80 dark:border-slate-800/80 p-5 space-y-4 ${
+                      habit.paused ? 'opacity-65' : ''
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                          <span
+                            className="inline-block w-2 h-2 rounded-sm mr-1.5"
+                            style={{ backgroundColor: cat.colour }}
+                          />
+                          {cat.label} · {formatHabitScheduleLabel(habit)}
+                          {preferredWindow ? ` · ${preferredWindow}` : ''}
                         </p>
+                        <h3 className="text-base font-semibold mt-0.5">
+                          {habit.title}
+                        </h3>
+                        {stackText && (
+                          <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                            {stackText}
+                          </p>
+                        )}
+                        {todayStarter && todayLog?.status !== 'done' && (
+                          <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mt-0.5">
+                            Started small today
+                          </p>
+                        )}
+                        {habit.notes && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            {habit.notes}
+                          </p>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => toggleHabitPause(habit.id)}
+                        className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 shrink-0"
+                      >
+                        {habit.paused ? 'Resume' : 'Pause'}
+                      </button>
+                    </div>
+
+                    {/* 14-day gentle visual strip */}
+                    <div className="flex items-center justify-between gap-1">
+                      {trailing14Dates.map((d) => {
+                        const sched = isHabitScheduledOnDate(
+                          habit,
+                          d,
+                          state.events,
+                          state.settings
+                        );
+                        const log = getEffectiveHabitLog(
+                          habit,
+                          d,
+                          state.habitLogs,
+                          sched.linkedOccurrences
+                        );
+                        const isToday = d === now.date;
+                        return (
+                          <button
+                            key={d}
+                            disabled={habit.paused}
+                            onClick={() => {
+                              if (!log) setHabitStatus(habit.id, d, 'done');
+                              else if (log.status === 'done')
+                                setHabitStatus(habit.id, d, 'partial');
+                              else if (log.status === 'partial')
+                                setHabitStatus(habit.id, d, 'excused');
+                              else if (log.status === 'excused')
+                                setHabitStatus(habit.id, d, 'skipped');
+                              else setHabitStatus(habit.id, d, 'clear');
+                            }}
+                            title={`${formatShortDate(d)} — ${
+                              log ? log.status : 'not logged'
+                            } (tap to cycle)`}
+                            className={`flex-1 h-7 rounded-md text-[10px] font-mono transition flex items-center justify-center ${
+                              log?.status === 'done'
+                                ? 'text-white font-semibold'
+                                : log?.status === 'partial'
+                                ? 'text-slate-900 dark:text-white font-semibold border'
+                                : log?.status === 'excused'
+                                ? 'bg-slate-100 dark:bg-slate-800/70 text-slate-500 border border-dashed border-slate-300 dark:border-slate-600'
+                                : log?.status === 'skipped'
+                                ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
+                                : 'bg-slate-100 dark:bg-slate-800/70 text-slate-400'
+                            } ${isToday ? 'ring-1 ring-slate-900 dark:ring-slate-200' : ''}`}
+                            style={
+                              log?.status === 'done'
+                                ? { backgroundColor: cat.colour }
+                                : log?.status === 'partial'
+                                ? {
+                                    backgroundColor: `${cat.colour}30`,
+                                    borderColor: cat.colour,
+                                  }
+                                : undefined
+                            }
+                          >
+                            {log?.status === 'done'
+                              ? '✓'
+                              : log?.status === 'partial'
+                              ? '◐'
+                              : log?.status === 'excused'
+                              ? 'E'
+                              : log?.status === 'skipped'
+                              ? '–'
+                              : d.slice(-2)}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <div className="text-xs text-slate-600 dark:text-slate-300 font-mono tabular-nums">
+                        Week: {Number.isInteger(weekCredits) ? weekCredits : weekCredits.toFixed(1)}/{weekTarget}
+                        {consistency !== null && ` · ${consistency}% (7d)`}
+                        {habit.paused && ' · Paused'}
+                      </div>
+
+                      {!habit.paused && (
+                        <div className="flex flex-wrap items-center gap-1">
+                          {starterEligible && (
+                            <button
+                              type="button"
+                              onClick={() => setStarterHabit(habit)}
+                              className="min-h-[36px] px-2.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-800 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-700 inline-flex items-center gap-1 transition"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" /> Start Small
+                            </button>
+                          )}
+                          <button
+                            onClick={() =>
+                              setHabitStatus(
+                                habit.id,
+                                now.date,
+                                todayLog?.status === 'done' ? 'clear' : 'done'
+                              )
+                            }
+                            className={`min-h-[36px] px-2.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ${
+                              todayLog?.status === 'done'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
+                            }`}
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            {todayLog?.status === 'done' ? 'Done' : 'Check in'}
+                          </button>
+                          <button
+                            onClick={() =>
+                              setHabitStatus(
+                                habit.id,
+                                now.date,
+                                todayLog?.status === 'excused' ? 'clear' : 'excused'
+                              )
+                            }
+                            className={`min-h-[36px] px-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition ${
+                              todayLog?.status === 'excused'
+                                ? 'bg-slate-200 dark:bg-slate-700'
+                                : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                            title="Excuse today (no penalty)"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() =>
+                              setHabitStatus(
+                                habit.id,
+                                now.date,
+                                todayLog?.status === 'skipped' ? 'clear' : 'skipped'
+                              )
+                            }
+                            className={`min-h-[36px] px-2 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition ${
+                              todayLog?.status === 'skipped'
+                                ? 'bg-slate-200 dark:bg-slate-700'
+                                : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                            title="Skip today"
+                          >
+                            <SkipForward className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       )}
                     </div>
-
-                    <button
-                      onClick={() => toggleHabitPause(habit.id)}
-                      className="text-xs font-medium px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700"
-                    >
-                      {habit.paused ? 'Resume' : 'Pause'}
-                    </button>
                   </div>
-
-                  {/* 14-day gentle visual strip */}
-                  <div className="flex items-center justify-between gap-1">
-                    {trailing14Dates.map((d) => {
-                      const log = state.habitLogs.find(
-                        (l) => l.habitId === habit.id && l.date === d
-                      );
-                      const isToday = d === now.date;
-                      return (
-                        <button
-                          key={d}
-                          disabled={habit.paused}
-                          onClick={() => {
-                            if (!log) setHabitStatus(habit.id, d, 'done');
-                            else if (log.status === 'done')
-                              setHabitStatus(habit.id, d, 'skipped');
-                            else setHabitStatus(habit.id, d, 'clear');
-                          }}
-                          title={`${formatShortDate(d)} — ${
-                            log ? log.status : 'not logged'
-                          } (tap to cycle)`}
-                          className={`flex-1 h-7 rounded-md text-[10px] font-mono transition flex items-center justify-center ${
-                            log?.status === 'done'
-                              ? 'text-white font-semibold'
-                              : log?.status === 'skipped'
-                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-300'
-                              : 'bg-slate-100 dark:bg-slate-800/70 text-slate-400'
-                          } ${isToday ? 'ring-1 ring-slate-900 dark:ring-slate-200' : ''}`}
-                          style={
-                            log?.status === 'done'
-                              ? { backgroundColor: cat.colour }
-                              : undefined
-                          }
-                        >
-                          {log?.status === 'done'
-                            ? '✓'
-                            : log?.status === 'skipped'
-                            ? '–'
-                            : d.slice(-2)}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3 pt-1 border-t border-slate-100 dark:border-slate-800">
-                    <div className="text-xs text-slate-600 dark:text-slate-300 font-mono tabular-nums">
-                      This week: {weekDone}/{habit.weeklyTarget}
-                      {consistency !== null && ` · ${consistency}% consistency`}
-                      {habit.paused && ' · Paused'}
-                    </div>
-
-                    {!habit.paused && (
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() =>
-                            setHabitStatus(
-                              habit.id,
-                              now.date,
-                              todayLog?.status === 'done' ? 'clear' : 'done'
-                            )
-                          }
-                          className={`min-h-[36px] px-3 rounded-lg text-xs font-semibold inline-flex items-center gap-1 transition ${
-                            todayLog?.status === 'done'
-                              ? 'bg-emerald-600 text-white'
-                              : 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                          }`}
-                        >
-                          <Check className="w-3.5 h-3.5" />
-                          {todayLog?.status === 'done' ? 'Done' : 'Check in'}
-                        </button>
-                        <button
-                          onClick={() =>
-                            setHabitStatus(
-                              habit.id,
-                              now.date,
-                              todayLog?.status === 'skipped' ? 'clear' : 'skipped'
-                            )
-                          }
-                          className={`min-h-[36px] px-2.5 rounded-lg text-xs font-medium inline-flex items-center gap-1 transition ${
-                            todayLog?.status === 'skipped'
-                              ? 'bg-slate-200 dark:bg-slate-700'
-                              : 'text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800'
-                          }`}
-                        >
-                          <SkipForward className="w-3.5 h-3.5" /> Skip day
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </div>
       )}
@@ -919,6 +1006,15 @@ export const TrackView: React.FC = () => {
             </div>
           )}
         </section>
+      )}
+
+      {starterHabit && (
+        <TwoMinuteStarterModal
+          isOpen={Boolean(starterHabit)}
+          onClose={() => setStarterHabit(null)}
+          habit={starterHabit}
+          date={now.date}
+        />
       )}
     </div>
   );

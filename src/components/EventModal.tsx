@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Trash2, X } from 'lucide-react';
+import { AlertTriangle, Trash2, X } from 'lucide-react';
 import { CATEGORIES } from '../data/seedData';
 import {
   CalendarEvent,
@@ -11,11 +11,13 @@ import {
 import { useLifeHQ } from '../context/LifeHQContext';
 import { getAvailableWindowFrom } from '../utils/calendarLayout';
 import {
+  formatDuration,
   getIsoWeekday,
   minutesToTime,
   timeToMinutes,
 } from '../utils/dateUtils';
 import { expandEventsForRange } from '../utils/recurrence';
+import { findOverlappingOccurrences } from '../utils/pillarUtils';
 
 interface EventModalProps {
   isOpen: boolean;
@@ -101,24 +103,48 @@ export const EventModal: React.FC<EventModalProps> = ({
   const [isSchoolTimetable, setIsSchoolTimetable] = useState(
     Boolean(masterEvent?.isSchoolTimetable)
   );
+  const [linkedHabitId, setLinkedHabitId] = useState<string>(
+    () =>
+      masterEvent?.linkedHabitId ??
+      (masterEvent
+        ? state.habits.find((h) => h.linkedEventIds?.includes(masterEvent.id))
+            ?.id ?? ''
+        : '')
+  );
   const [validationErr, setValidationErr] = useState<string | null>(null);
 
-  const availableWindow = useMemo(() => {
-    if (!date || !startTime) return null;
-    const dayOccs = expandEventsForRange(
+  const dayOccsForSelectedDate = useMemo(() => {
+    if (!date) return [];
+    return expandEventsForRange(
       state.events,
       date,
       date,
       state.settings,
       state.activityRecords
-    ).filter((occ) => occ.occurrenceKey !== editingOccurrence?.occurrenceKey);
-    return getAvailableWindowFrom(dayOccs, timeToMinutes(startTime));
+    );
+  }, [date, state.events, state.settings, state.activityRecords]);
+
+  const availableWindow = useMemo(() => {
+    if (!date || !startTime) return null;
+    const filtered = dayOccsForSelectedDate.filter(
+      (occ) => occ.occurrenceKey !== editingOccurrence?.occurrenceKey
+    );
+    return getAvailableWindowFrom(filtered, timeToMinutes(startTime));
+  }, [date, startTime, dayOccsForSelectedDate, editingOccurrence?.occurrenceKey]);
+
+  const overlapMatches = useMemo(() => {
+    if (!date || !startTime || !endTime || endTime <= startTime) return [];
+    return findOverlappingOccurrences(
+      startTime,
+      endTime,
+      dayOccsForSelectedDate,
+      editingOccurrence?.occurrenceKey
+    );
   }, [
     date,
     startTime,
-    state.events,
-    state.settings,
-    state.activityRecords,
+    endTime,
+    dayOccsForSelectedDate,
     editingOccurrence?.occurrenceKey,
   ]);
 
@@ -200,6 +226,7 @@ export const EventModal: React.FC<EventModalProps> = ({
       location: location.trim() || undefined,
       notes: notes.trim() || undefined,
       reminderMinutes,
+      linkedHabitId: linkedHabitId || undefined,
     };
 
     upsertEvent(eventPayload);
@@ -285,7 +312,7 @@ export const EventModal: React.FC<EventModalProps> = ({
               maxLength={200}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Behold client shoot, Gateway Youth..."
+              placeholder="e.g. Deep work session, Training, Community gathering..."
               className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-slate-400"
             />
           </div>
@@ -379,6 +406,31 @@ export const EventModal: React.FC<EventModalProps> = ({
                     Use until {availableWindow.untilTime}
                   </button>
                 )}
+            </div>
+          )}
+
+          {overlapMatches.length > 0 && (
+            <div
+              role="status"
+              className="rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 px-3 py-2.5 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2"
+            >
+              <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold">
+                  Schedule overlap detected ({overlapMatches.length})
+                </p>
+                <p className="mt-0.5 opacity-90">
+                  Overlaps{' '}
+                  {overlapMatches
+                    .slice(0, 2)
+                    .map(
+                      (m) =>
+                        `${m.occurrence.title} (${m.occurrence.startTime}–${m.occurrence.endTime}, ${formatDuration(m.overlapMinutes)})`
+                    )
+                    .join(' and ')}
+                  . Adjust times or save if intentional.
+                </p>
+              </div>
             </div>
           )}
 
@@ -566,6 +618,26 @@ export const EventModal: React.FC<EventModalProps> = ({
                 className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm font-mono"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+              Link habit (optional — completing this activity fulfils the habit)
+            </label>
+            <select
+              value={linkedHabitId}
+              onChange={(e) => setLinkedHabitId(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm"
+            >
+              <option value="">None</option>
+              {state.habits
+                .filter((h) => !h.archived)
+                .map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.title}
+                  </option>
+                ))}
+            </select>
           </div>
 
           <div>

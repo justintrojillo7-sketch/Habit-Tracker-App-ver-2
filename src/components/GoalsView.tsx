@@ -5,8 +5,14 @@ import { useLifeHQ } from '../context/LifeHQContext';
 import { CategoryId, Goal, Milestone } from '../types/lifehq';
 
 export const GoalsView: React.FC = () => {
-  const { state, getCategoryMeta, toggleMilestone, upsertGoal, deleteGoal } =
-    useLifeHQ();
+  const {
+    state,
+    getCategoryMeta,
+    toggleMilestone,
+    upsertGoal,
+    deleteGoal,
+    openPillar,
+  } = useLifeHQ();
 
   const [filterCat, setFilterCat] = useState<CategoryId | 'all'>('all');
   const [modalOpen, setModalOpen] = useState(false);
@@ -252,6 +258,30 @@ export const GoalsView: React.FC = () => {
                         </span>
                       </button>
                     ))}
+                  </div>
+                )}
+
+                {(goal.category === 'faith' ||
+                  goal.category === 'fitness' ||
+                  goal.category === 'behold') && (
+                  <div className="pt-1 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPillar(
+                          goal.category as 'faith' | 'fitness' | 'behold'
+                        )
+                      }
+                      className="text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white underline underline-offset-4"
+                    >
+                      Open{' '}
+                      {goal.category === 'faith'
+                        ? 'Faith workspace'
+                        : goal.category === 'fitness'
+                        ? 'Fitness logger'
+                        : 'Creative Craft tracker'}{' '}
+                      →
+                    </button>
                   </div>
                 )}
               </div>

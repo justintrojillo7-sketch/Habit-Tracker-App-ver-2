@@ -19,7 +19,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 180 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function incoming() {
@@ -44,7 +44,7 @@ service cloud.firestore {
 
     function isValidWorkspace(data, userId) {
       return data.keys().hasAll(['ownerId', 'theme', 'weekAnchorMonday', 'weekAnchorType', 'targetBedtime', 'notificationsEnabled', 'updatedAt'])
-        && data.keys().hasOnly(['ownerId', 'theme', 'weekAnchorMonday', 'weekAnchorType', 'weekOverrides', 'schoolHolidays', 'targetBedtime', 'notificationsEnabled', 'reminderOptions', 'categoryColours', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'theme', 'weekAnchorMonday', 'weekAnchorType', 'weekOverrides', 'schoolHolidays', 'targetBedtime', 'notificationsEnabled', 'reminderOptions', 'categoryColours', 'schemaVersion', 'migrationMeta', 'updatedAt'])
         && data.ownerId == userId
         && data.theme in ['system', 'light', 'dark']
         && isValidDateStr(data.weekAnchorMonday)
@@ -55,7 +55,9 @@ service cloud.firestore {
         && (!('weekOverrides' in data) || data.weekOverrides is map)
         && (!('schoolHolidays' in data) || (data.schoolHolidays is list && data.schoolHolidays.size() <= 60))
         && (!('reminderOptions' in data) || data.reminderOptions is map)
-        && (!('categoryColours' in data) || data.categoryColours is map);
+        && (!('categoryColours' in data) || data.categoryColours is map)
+        && (!('schemaVersion' in data) || (data.schemaVersion is int && data.schemaVersion >= 1 && data.schemaVersion <= 100))
+        && (!('migrationMeta' in data) || data.migrationMeta is map);
     }
 
     function isValidEvent(data, userId, eventId) {
@@ -130,7 +132,7 @@ service cloud.firestore {
 
     function isValidHabit(data, userId, habitId) {
       return data.keys().hasAll(['ownerId', 'id', 'title', 'category', 'frequency', 'weeklyTarget', 'paused'])
-        && data.keys().hasOnly(['ownerId', 'id', 'title', 'category', 'frequency', 'weeklyTarget', 'paused', 'notes'])
+        && data.keys().hasOnly(['ownerId', 'id', 'title', 'category', 'frequency', 'weeklyTarget', 'daysOfWeek', 'targetMinutes', 'targetQuantity', 'targetUnit', 'cue', 'twoMinuteRule', 'stackAnchorEventId', 'stackAnchorLabel', 'stackAction', 'preferredWindowStart', 'preferredWindowEnd', 'linkedEventIds', 'templateKey', 'createdAt', 'paused', 'archived', 'notes'])
         && data.ownerId == userId
         && data.id == habitId
         && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
@@ -138,18 +140,36 @@ service cloud.firestore {
         && data.frequency in ['daily', 'weekly', 'custom']
         && data.weeklyTarget is int && data.weeklyTarget >= 1 && data.weeklyTarget <= 14
         && data.paused is bool
+        && (!('archived' in data) || data.archived is bool)
+        && (!('daysOfWeek' in data) || (data.daysOfWeek is list && data.daysOfWeek.size() <= 7 && (data.daysOfWeek.size() == 0 || data.daysOfWeek[0] is int)))
+        && (!('targetMinutes' in data) || (data.targetMinutes is number && data.targetMinutes >= 1 && data.targetMinutes <= 1440))
+        && (!('targetQuantity' in data) || (data.targetQuantity is number && data.targetQuantity >= 1 && data.targetQuantity <= 10000))
+        && (!('targetUnit' in data) || (data.targetUnit is string && data.targetUnit.size() <= 40))
+        && (!('cue' in data) || (data.cue is string && data.cue.size() <= 200))
+        && (!('twoMinuteRule' in data) || (data.twoMinuteRule is string && data.twoMinuteRule.size() <= 200))
+        && (!('stackAnchorEventId' in data) || (data.stackAnchorEventId is string && data.stackAnchorEventId.size() <= 128))
+        && (!('stackAnchorLabel' in data) || (data.stackAnchorLabel is string && data.stackAnchorLabel.size() <= 160))
+        && (!('stackAction' in data) || (data.stackAction is string && data.stackAction.size() <= 200))
+        && (!('preferredWindowStart' in data) || isValidTimeStr(data.preferredWindowStart))
+        && (!('preferredWindowEnd' in data) || isValidTimeStr(data.preferredWindowEnd))
+        && (!('linkedEventIds' in data) || (data.linkedEventIds is list && data.linkedEventIds.size() <= 20 && (data.linkedEventIds.size() == 0 || data.linkedEventIds[0] is string)))
+        && (!('templateKey' in data) || (data.templateKey is string && data.templateKey.size() <= 80))
+        && (!('createdAt' in data) || isValidDateStr(data.createdAt))
         && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
     }
 
     function isValidHabitLog(data, userId, logId) {
       return data.keys().hasAll(['ownerId', 'id', 'habitId', 'date', 'status'])
-        && data.keys().hasOnly(['ownerId', 'id', 'habitId', 'date', 'status', 'source'])
+        && data.keys().hasOnly(['ownerId', 'id', 'habitId', 'date', 'status', 'source', 'notes', 'actualValue', 'updatedAt'])
         && data.ownerId == userId
         && data.id == logId
         && data.habitId is string && data.habitId.size() >= 1 && data.habitId.size() <= 128
         && isValidDateStr(data.date)
-        && data.status in ['done', 'skipped']
-        && (!('source' in data) || data.source in ['manual', 'calendar']);
+        && data.status in ['done', 'partial', 'skipped', 'excused', 'starter']
+        && (!('source' in data) || data.source in ['manual', 'calendar'])
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 500))
+        && (!('actualValue' in data) || (data.actualValue is number && data.actualValue >= 0 && data.actualValue <= 10000))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 40));
     }
 
     function isValidGoal(data, userId, goalId) {
@@ -199,6 +219,124 @@ service cloud.firestore {
         && (!('linkedOccurrenceDate' in data) || isValidDateStr(data.linkedOccurrenceDate));
     }
 
+    function isValidDevotionEntry(data, userId, entryId) {
+      return data.keys().hasAll(['ownerId', 'id', 'date', 'routineType', 'scriptureRef', 'reflection', 'prayerCompleted', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'date', 'routineType', 'hydrated', 'watchwordsOpened', 'scriptureRef', 'reflection', 'prayerCompleted', 'journalThoughts', 'questions', 'gratitude', 'application', 'shortOrMoved', 'movedNote', 'durationMinutes', 'updatedAt'])
+        && data.ownerId == userId
+        && data.id == entryId
+        && isValidDateStr(data.date)
+        && data.routineType in ['morning', 'evening']
+        && data.scriptureRef is string && data.scriptureRef.size() <= 200
+        && data.reflection is string && data.reflection.size() <= 2000
+        && data.prayerCompleted is bool
+        && data.updatedAt is string && data.updatedAt.size() <= 40
+        && (!('hydrated' in data) || data.hydrated is bool)
+        && (!('watchwordsOpened' in data) || data.watchwordsOpened is bool)
+        && (!('journalThoughts' in data) || (data.journalThoughts is string && data.journalThoughts.size() <= 2000))
+        && (!('questions' in data) || (data.questions is string && data.questions.size() <= 1000))
+        && (!('gratitude' in data) || (data.gratitude is string && data.gratitude.size() <= 1000))
+        && (!('application' in data) || (data.application is string && data.application.size() <= 1000))
+        && (!('shortOrMoved' in data) || data.shortOrMoved is bool)
+        && (!('movedNote' in data) || (data.movedNote is string && data.movedNote.size() <= 500))
+        && (!('durationMinutes' in data) || (data.durationMinutes is number && data.durationMinutes >= 0 && data.durationMinutes <= 240));
+    }
+
+    function isValidBibleStudy(data, userId, studyId) {
+      return data.keys().hasAll(['ownerId', 'id', 'book', 'passage', 'status', 'orderIndex', 'readingProgress', 'observations', 'historicalContext', 'theologicalInterpretation', 'crossReferences', 'practicalApplication', 'questions', 'prayerAndJournal', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'book', 'passage', 'status', 'orderIndex', 'readingProgress', 'observations', 'historicalContext', 'theologicalInterpretation', 'crossReferences', 'practicalApplication', 'questions', 'prayerAndJournal', 'updatedAt'])
+        && data.ownerId == userId
+        && data.id == studyId
+        && data.book is string && data.book.size() >= 1 && data.book.size() <= 120
+        && data.passage is string && data.passage.size() <= 160
+        && data.status in ['completed', 'in-progress', 'upcoming']
+        && data.orderIndex is number && data.orderIndex >= 0 && data.orderIndex <= 500
+        && data.readingProgress is string && data.readingProgress.size() <= 300
+        && data.observations is string && data.observations.size() <= 4000
+        && data.historicalContext is string && data.historicalContext.size() <= 4000
+        && data.theologicalInterpretation is string && data.theologicalInterpretation.size() <= 4000
+        && data.crossReferences is string && data.crossReferences.size() <= 2000
+        && data.practicalApplication is string && data.practicalApplication.size() <= 4000
+        && data.questions is string && data.questions.size() <= 2000
+        && data.prayerAndJournal is string && data.prayerAndJournal.size() <= 4000
+        && data.updatedAt is string && data.updatedAt.size() <= 40;
+    }
+
+    function isValidWorkoutLog(data, userId, logId) {
+      return data.keys().hasAll(['ownerId', 'id', 'date', 'sessionKey', 'sessionTitle', 'durationMinutes', 'exercises', 'completed', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'date', 'sessionKey', 'sessionTitle', 'linkedEventId', 'durationMinutes', 'exercises', 'effortRpe', 'soreness', 'recoveryNotes', 'completed', 'updatedAt'])
+        && data.ownerId == userId
+        && data.id == logId
+        && isValidDateStr(data.date)
+        && data.sessionKey in ['upper_a', 'lower_a', 'upper_b', 'lower_b']
+        && data.sessionTitle is string && data.sessionTitle.size() >= 1 && data.sessionTitle.size() <= 120
+        && (!('linkedEventId' in data) || (data.linkedEventId is string && data.linkedEventId.size() <= 128))
+        && data.durationMinutes is number && data.durationMinutes >= 0 && data.durationMinutes <= 360
+        && data.exercises is list && data.exercises.size() <= 40
+        && (!('effortRpe' in data) || (data.effortRpe is number && data.effortRpe >= 1 && data.effortRpe <= 10))
+        && (!('soreness' in data) || (data.soreness is number && data.soreness >= 1 && data.soreness <= 5))
+        && (!('recoveryNotes' in data) || (data.recoveryNotes is string && data.recoveryNotes.size() <= 1000))
+        && data.completed is bool
+        && data.updatedAt is string && data.updatedAt.size() <= 40;
+    }
+
+    function isValidCardioLog(data, userId, logId) {
+      return data.keys().hasAll(['ownerId', 'id', 'date', 'weekType', 'cardioType', 'durationMinutes', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'date', 'weekType', 'cardioType', 'durationMinutes', 'distanceKm', 'averagePace', 'sprintReps', 'accelerationSeconds', 'perceivedEffort', 'recoveryQuality', 'notes', 'updatedAt'])
+        && data.ownerId == userId
+        && data.id == logId
+        && isValidDateStr(data.date)
+        && data.weekType in ['A', 'B']
+        && data.cardioType in ['endurance', 'sprint', 'low_impact', 'skipped']
+        && data.durationMinutes is number && data.durationMinutes >= 0 && data.durationMinutes <= 300
+        && (!('distanceKm' in data) || (data.distanceKm is number && data.distanceKm >= 0 && data.distanceKm <= 200))
+        && (!('averagePace' in data) || (data.averagePace is string && data.averagePace.size() <= 40))
+        && (!('sprintReps' in data) || (data.sprintReps is number && data.sprintReps >= 0 && data.sprintReps <= 50))
+        && (!('accelerationSeconds' in data) || (data.accelerationSeconds is number && data.accelerationSeconds >= 0 && data.accelerationSeconds <= 120))
+        && (!('perceivedEffort' in data) || (data.perceivedEffort is number && data.perceivedEffort >= 1 && data.perceivedEffort <= 10))
+        && (!('recoveryQuality' in data) || (data.recoveryQuality is string && data.recoveryQuality.size() <= 200))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000))
+        && data.updatedAt is string && data.updatedAt.size() <= 40;
+    }
+
+    function isValidBeholdWeek(data, userId, weekId) {
+      return data.keys().hasAll(['ownerId', 'id', 'weekNumber', 'monthPhase', 'monthTitle', 'title', 'challenge', 'learningObjective', 'technicalFocus', 'practicalExercise', 'shotList', 'status', 'projectLink', 'clientProjectName', 'reflectionWorked', 'reflectionDidntWork', 'reflectionImprove', 'portfolioReady', 'updatedAt'])
+        && data.keys().hasOnly(['ownerId', 'id', 'weekNumber', 'monthPhase', 'monthTitle', 'title', 'challenge', 'learningObjective', 'technicalFocus', 'practicalExercise', 'shotList', 'linkedEventId', 'status', 'projectLink', 'clientProjectName', 'reflectionWorked', 'reflectionDidntWork', 'reflectionImprove', 'portfolioReady', 'updatedAt'])
+        && data.ownerId == userId
+        && data.id == weekId
+        && data.weekNumber is number && data.weekNumber >= 1 && data.weekNumber <= 52
+        && data.monthPhase in [1, 2, 3]
+        && data.monthTitle is string && data.monthTitle.size() <= 120
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.challenge is string && data.challenge.size() <= 500
+        && data.learningObjective is string && data.learningObjective.size() <= 1000
+        && data.technicalFocus is string && data.technicalFocus.size() <= 500
+        && data.practicalExercise is string && data.practicalExercise.size() <= 1000
+        && data.shotList is list && data.shotList.size() <= 50
+        && (!('linkedEventId' in data) || (data.linkedEventId is string && data.linkedEventId.size() <= 128))
+        && data.status in ['not-started', 'in-progress', 'completed']
+        && data.projectLink is string && data.projectLink.size() <= 400
+        && data.clientProjectName is string && data.clientProjectName.size() <= 160
+        && data.reflectionWorked is string && data.reflectionWorked.size() <= 1500
+        && data.reflectionDidntWork is string && data.reflectionDidntWork.size() <= 1500
+        && data.reflectionImprove is string && data.reflectionImprove.size() <= 1500
+        && data.portfolioReady is bool
+        && data.updatedAt is string && data.updatedAt.size() <= 40;
+    }
+
+    function isValidFitnessConfig(data, userId) {
+      return data.keys().hasAll(['ownerId', 'rebuildStartDate', 'proteinTargetMin', 'proteinTargetMax', 'dailyProteinLogs', 'volleyballCompetitiveMode', 'programmeReviewNotes', 'workoutPlan'])
+        && data.keys().hasOnly(['ownerId', 'rebuildStartDate', 'proteinTargetMin', 'proteinTargetMax', 'dailyProteinLogs', 'volleyballCompetitiveMode', 'programmeReviewNotes', 'lastReviewDate', 'workoutPlan'])
+        && data.ownerId == userId
+        && isValidDateStr(data.rebuildStartDate)
+        && data.proteinTargetMin is number && data.proteinTargetMin >= 0 && data.proteinTargetMin <= 400
+        && data.proteinTargetMax is number && data.proteinTargetMax >= 0 && data.proteinTargetMax <= 500
+        && data.dailyProteinLogs is map
+        && data.volleyballCompetitiveMode is bool
+        && data.programmeReviewNotes is string && data.programmeReviewNotes.size() <= 2000
+        && (!('lastReviewDate' in data) || isValidDateStr(data.lastReviewDate))
+        && data.workoutPlan is list && data.workoutPlan.size() <= 10;
+    }
+
     // Connection probe document (read-only ping)
     match /test/connection {
       allow get: if true;
@@ -211,7 +349,7 @@ service cloud.firestore {
       allow update: if isValidId(userId) && isOwner(userId)
         && isValidWorkspace(incoming(), userId)
         && incoming().ownerId == existing().ownerId
-        && incoming().diff(existing()).affectedKeys().hasOnly(['theme', 'weekAnchorMonday', 'weekAnchorType', 'weekOverrides', 'schoolHolidays', 'targetBedtime', 'notificationsEnabled', 'reminderOptions', 'categoryColours', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['theme', 'weekAnchorMonday', 'weekAnchorType', 'weekOverrides', 'schoolHolidays', 'targetBedtime', 'notificationsEnabled', 'reminderOptions', 'categoryColours', 'schemaVersion', 'migrationMeta', 'updatedAt']);
       allow delete: if false;
 
       match /events/{eventId} {
@@ -260,7 +398,7 @@ service cloud.firestore {
           && isValidHabit(incoming(), userId, habitId)
           && incoming().ownerId == existing().ownerId
           && incoming().id == existing().id
-          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'frequency', 'weeklyTarget', 'paused', 'notes']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['title', 'category', 'frequency', 'weeklyTarget', 'daysOfWeek', 'targetMinutes', 'targetQuantity', 'targetUnit', 'cue', 'twoMinuteRule', 'stackAnchorEventId', 'stackAnchorLabel', 'stackAction', 'preferredWindowStart', 'preferredWindowEnd', 'linkedEventIds', 'templateKey', 'createdAt', 'paused', 'archived', 'notes']);
         allow delete: if isValidId(habitId) && isOwner(userId);
       }
 
@@ -272,7 +410,7 @@ service cloud.firestore {
           && isValidHabitLog(incoming(), userId, logId)
           && incoming().ownerId == existing().ownerId
           && incoming().id == existing().id
-          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'source']);
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'source', 'notes', 'actualValue', 'updatedAt']);
         allow delete: if isValidId(logId) && isOwner(userId);
       }
 
@@ -300,14 +438,84 @@ service cloud.firestore {
         allow delete: if isValidId(reviewId) && isOwner(userId);
       }
 
-      match /runtime/{runtimeId} {
-        allow get: if runtimeId == 'activeTimer' && isOwner(userId);
-        allow create: if runtimeId == 'activeTimer' && isOwner(userId) && isValidActiveTimer(incoming(), userId);
-        allow update: if runtimeId == 'activeTimer' && isOwner(userId)
-          && isValidActiveTimer(incoming(), userId)
+      match /devotionEntries/{entryId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(entryId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(entryId) && isOwner(userId) && isValidDevotionEntry(incoming(), userId, entryId);
+        allow update: if isValidId(entryId) && isOwner(userId)
+          && isValidDevotionEntry(incoming(), userId, entryId)
           && incoming().ownerId == existing().ownerId
-          && incoming().diff(existing()).affectedKeys().hasOnly(['id', 'isRunning', 'startedAtMs', 'accumulatedMs', 'category', 'subcategory', 'title', 'project', 'notes', 'linkedEventId', 'linkedOccurrenceDate']);
-        allow delete: if runtimeId == 'activeTimer' && isOwner(userId);
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'routineType', 'hydrated', 'watchwordsOpened', 'scriptureRef', 'reflection', 'prayerCompleted', 'journalThoughts', 'questions', 'gratitude', 'application', 'shortOrMoved', 'movedNote', 'durationMinutes', 'updatedAt']);
+        allow delete: if isValidId(entryId) && isOwner(userId);
+      }
+
+      match /bibleStudies/{studyId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(studyId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(studyId) && isOwner(userId) && isValidBibleStudy(incoming(), userId, studyId);
+        allow update: if isValidId(studyId) && isOwner(userId)
+          && isValidBibleStudy(incoming(), userId, studyId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['book', 'passage', 'status', 'orderIndex', 'readingProgress', 'observations', 'historicalContext', 'theologicalInterpretation', 'crossReferences', 'practicalApplication', 'questions', 'prayerAndJournal', 'updatedAt']);
+        allow delete: if isValidId(studyId) && isOwner(userId);
+      }
+
+      match /workoutLogs/{logId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(logId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(logId) && isOwner(userId) && isValidWorkoutLog(incoming(), userId, logId);
+        allow update: if isValidId(logId) && isOwner(userId)
+          && isValidWorkoutLog(incoming(), userId, logId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'sessionKey', 'sessionTitle', 'linkedEventId', 'durationMinutes', 'exercises', 'effortRpe', 'soreness', 'recoveryNotes', 'completed', 'updatedAt']);
+        allow delete: if isValidId(logId) && isOwner(userId);
+      }
+
+      match /cardioLogs/{logId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(logId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(logId) && isOwner(userId) && isValidCardioLog(incoming(), userId, logId);
+        allow update: if isValidId(logId) && isOwner(userId)
+          && isValidCardioLog(incoming(), userId, logId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'weekType', 'cardioType', 'durationMinutes', 'distanceKm', 'averagePace', 'sprintReps', 'accelerationSeconds', 'perceivedEffort', 'recoveryQuality', 'notes', 'updatedAt']);
+        allow delete: if isValidId(logId) && isOwner(userId);
+      }
+
+      match /beholdWeeks/{weekId} {
+        allow list: if isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow get: if isValidId(weekId) && isOwner(userId) && existing().ownerId == request.auth.uid;
+        allow create: if isValidId(weekId) && isOwner(userId) && isValidBeholdWeek(incoming(), userId, weekId);
+        allow update: if isValidId(weekId) && isOwner(userId)
+          && isValidBeholdWeek(incoming(), userId, weekId)
+          && incoming().ownerId == existing().ownerId
+          && incoming().id == existing().id
+          && incoming().diff(existing()).affectedKeys().hasOnly(['weekNumber', 'monthPhase', 'monthTitle', 'title', 'challenge', 'learningObjective', 'technicalFocus', 'practicalExercise', 'shotList', 'linkedEventId', 'status', 'projectLink', 'clientProjectName', 'reflectionWorked', 'reflectionDidntWork', 'reflectionImprove', 'portfolioReady', 'updatedAt']);
+        allow delete: if isValidId(weekId) && isOwner(userId);
+      }
+
+      match /runtime/{runtimeId} {
+        allow get: if (runtimeId == 'activeTimer' || runtimeId == 'fitnessConfig') && isOwner(userId);
+        allow create: if isOwner(userId) && (
+          (runtimeId == 'activeTimer' && isValidActiveTimer(incoming(), userId)) ||
+          (runtimeId == 'fitnessConfig' && isValidFitnessConfig(incoming(), userId))
+        );
+        allow update: if isOwner(userId)
+          && incoming().ownerId == existing().ownerId
+          && (
+            (runtimeId == 'activeTimer'
+              && isValidActiveTimer(incoming(), userId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['id', 'isRunning', 'startedAtMs', 'accumulatedMs', 'category', 'subcategory', 'title', 'project', 'notes', 'linkedEventId', 'linkedOccurrenceDate']))
+            ||
+            (runtimeId == 'fitnessConfig'
+              && isValidFitnessConfig(incoming(), userId)
+              && incoming().diff(existing()).affectedKeys().hasOnly(['rebuildStartDate', 'proteinTargetMin', 'proteinTargetMax', 'dailyProteinLogs', 'volleyballCompetitiveMode', 'programmeReviewNotes', 'lastReviewDate', 'workoutPlan']))
+          );
+        allow delete: if (runtimeId == 'activeTimer' || runtimeId == 'fitnessConfig') && isOwner(userId);
       }
     }
   }

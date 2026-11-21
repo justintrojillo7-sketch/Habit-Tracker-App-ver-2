@@ -17,7 +17,7 @@ export default defineConfig(() => {
           id: '/',
           name: 'LifeHQ — Personal Life Operating System',
           short_name: 'LifeHQ',
-          description: 'Low-friction personal operating system for teaching, videography, fitness, faith and ministry, personal commitments, and rest.',
+          description: 'Low-friction personal life operating system for scheduling, habits, time tracking, goals, and intentional daily development.',
           theme_color: '#f8f9fb',
           background_color: '#f8f9fb',
           display: 'standalone',

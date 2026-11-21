@@ -1360,6 +1360,20 @@ export const CalendarView: React.FC = () => {
                   Linked responsibility: {selectedOcc.linkedRoleBadge}
                 </p>
               )}
+              {(() => {
+                const linkedHabit = state.habits.find(
+                  (h) =>
+                    !h.archived &&
+                    (h.id === selectedOcc.linkedHabitId ||
+                      h.linkedEventIds?.includes(selectedOcc.eventId))
+                );
+                if (!linkedHabit) return null;
+                return (
+                  <p className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                    Linked habit: {linkedHabit.title}
+                  </p>
+                );
+              })()}
               {selectedOcc.notes && (
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   {selectedOcc.notes}

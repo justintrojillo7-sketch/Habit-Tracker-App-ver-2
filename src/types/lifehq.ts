@@ -9,10 +9,14 @@ export type CategoryId =
 export type NavSection =
   | 'today'
   | 'calendar'
+  | 'habits'
+  | 'pillars'
   | 'track'
   | 'insights'
   | 'goals'
   | 'settings';
+
+export type PillarTab = 'faith' | 'fitness' | 'behold';
 
 export type WeekType = 'A' | 'B';
 
@@ -172,11 +176,26 @@ export interface Habit {
   category: CategoryId;
   frequency: HabitFrequency;
   weeklyTarget: number;
+  daysOfWeek?: number[];
+  targetMinutes?: number;
+  targetQuantity?: number;
+  targetUnit?: string;
+  cue?: string;
+  twoMinuteRule?: string;
+  stackAnchorEventId?: string;
+  stackAnchorLabel?: string;
+  stackAction?: string;
+  preferredWindowStart?: string;
+  preferredWindowEnd?: string;
+  linkedEventIds?: string[];
+  templateKey?: string;
+  createdAt?: string;
   paused: boolean;
+  archived?: boolean;
   notes?: string;
 }
 
-export type HabitLogStatus = 'done' | 'skipped';
+export type HabitLogStatus = 'done' | 'partial' | 'skipped' | 'excused' | 'starter';
 
 export interface HabitLog {
   id: string;
@@ -184,6 +203,9 @@ export interface HabitLog {
   date: string;
   status: HabitLogStatus;
   source?: 'manual' | 'calendar';
+  notes?: string;
+  actualValue?: number;
+  updatedAt?: string;
 }
 
 export interface Milestone {
@@ -222,6 +244,168 @@ export interface HolidayRange {
   endDate: string;
 }
 
+// ========================
+// PILLAR 1: FAITH
+// ========================
+export type DevotionRoutineType = 'morning' | 'evening';
+
+export interface DevotionEntry {
+  id: string;
+  date: string;
+  routineType: DevotionRoutineType;
+  hydrated?: boolean;
+  watchwordsOpened?: boolean;
+  scriptureRef: string;
+  reflection: string;
+  prayerCompleted: boolean;
+  journalThoughts?: string;
+  questions?: string;
+  gratitude?: string;
+  application?: string;
+  shortOrMoved?: boolean;
+  movedNote?: string;
+  durationMinutes?: number;
+  updatedAt: string;
+}
+
+export type BibleStudyStatus = 'completed' | 'in-progress' | 'upcoming';
+
+export interface BibleStudyNote {
+  id: string;
+  book: string;
+  passage: string;
+  status: BibleStudyStatus;
+  orderIndex: number;
+  readingProgress: string;
+  observations: string;
+  historicalContext: string;
+  theologicalInterpretation: string;
+  crossReferences: string;
+  practicalApplication: string;
+  questions: string;
+  prayerAndJournal: string;
+  updatedAt: string;
+}
+
+// ========================
+// PILLAR 2: FITNESS
+// ========================
+export type WorkoutSessionKey = 'upper_a' | 'lower_a' | 'upper_b' | 'lower_b';
+
+export interface WorkoutExerciseTemplate {
+  id: string;
+  name: string;
+  targetSets: number;
+  repMin: number;
+  repMax: number;
+  repUnit?: string;
+  isSuperset?: boolean;
+  notes?: string;
+}
+
+export interface WorkoutPlanSession {
+  key: WorkoutSessionKey;
+  title: string;
+  shortLabel: string;
+  dayOfWeek: number;
+  linkedEventId?: string;
+  focus: string;
+  exercises: WorkoutExerciseTemplate[];
+}
+
+export interface WorkoutSetLog {
+  weightKg: number;
+  reps: number;
+  completed: boolean;
+}
+
+export interface LoggedExercise {
+  exerciseId: string;
+  name: string;
+  targetSets: number;
+  repMin: number;
+  repMax: number;
+  sets: WorkoutSetLog[];
+  notes?: string;
+}
+
+export interface WorkoutSessionLog {
+  id: string;
+  date: string;
+  sessionKey: WorkoutSessionKey;
+  sessionTitle: string;
+  linkedEventId?: string;
+  durationMinutes: number;
+  exercises: LoggedExercise[];
+  effortRpe?: number;
+  soreness?: number;
+  recoveryNotes?: string;
+  completed: boolean;
+  updatedAt: string;
+}
+
+export type CardioType = 'endurance' | 'sprint' | 'low_impact' | 'skipped';
+
+export interface CardioSessionLog {
+  id: string;
+  date: string;
+  weekType: WeekType;
+  cardioType: CardioType;
+  durationMinutes: number;
+  distanceKm?: number;
+  averagePace?: string;
+  sprintReps?: number;
+  accelerationSeconds?: number;
+  perceivedEffort?: number;
+  recoveryQuality?: string;
+  notes?: string;
+  updatedAt: string;
+}
+
+export interface FitnessConfig {
+  rebuildStartDate: string;
+  proteinTargetMin: number;
+  proteinTargetMax: number;
+  dailyProteinLogs: Record<string, number>;
+  volleyballCompetitiveMode: boolean;
+  programmeReviewNotes: string;
+  lastReviewDate?: string;
+  workoutPlan: WorkoutPlanSession[];
+}
+
+// ========================
+// PILLAR 3: BEHOLD
+// ========================
+export type BeholdWeekStatus = 'not-started' | 'in-progress' | 'completed';
+
+export interface BeholdShotItem {
+  id: string;
+  label: string;
+  completed: boolean;
+}
+
+export interface BeholdWeekItem {
+  id: string;
+  weekNumber: number;
+  monthPhase: 1 | 2 | 3;
+  monthTitle: string;
+  title: string;
+  challenge: string;
+  learningObjective: string;
+  technicalFocus: string;
+  practicalExercise: string;
+  shotList: BeholdShotItem[];
+  linkedEventId?: string;
+  status: BeholdWeekStatus;
+  projectLink: string;
+  clientProjectName: string;
+  reflectionWorked: string;
+  reflectionDidntWork: string;
+  reflectionImprove: string;
+  portfolioReady: boolean;
+  updatedAt: string;
+}
+
 export interface AppSettings {
   theme: ThemePreference;
   weekAnchorMonday: string;
@@ -240,6 +424,11 @@ export interface AppSettings {
   categoryColours: Record<CategoryId, string>;
 }
 
+export interface MigrationMeta {
+  personalImportCompletedAt?: string;
+  importedFrom?: string;
+}
+
 export interface AppState {
   version: number;
   events: CalendarEvent[];
@@ -251,4 +440,11 @@ export interface AppState {
   goals: Goal[];
   weeklyReviews: WeeklyReviewEntry[];
   settings: AppSettings;
+  devotionEntries: DevotionEntry[];
+  bibleStudies: BibleStudyNote[];
+  workoutLogs: WorkoutSessionLog[];
+  cardioLogs: CardioSessionLog[];
+  beholdWeeks: BeholdWeekItem[];
+  fitnessConfig: FitnessConfig;
+  migrationMeta?: MigrationMeta;
 }

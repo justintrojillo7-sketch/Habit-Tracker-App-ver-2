@@ -23,6 +23,7 @@ import {
   parseICSEvents,
 } from '../utils/ics';
 import { expandEventsForRange } from '../utils/recurrence';
+import { ImportBackupModal } from './ImportBackupModal';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -30,12 +31,12 @@ export const SettingsView: React.FC = () => {
     now,
     cloudUser,
     cloudSyncStatus,
+    legacyBackupInfo,
     signInCloud,
     signOutCloud,
     updateSettings,
     importEvents,
-    restoreState,
-    resetDemoData,
+    resetWorkspaceToEmpty,
     loadDemoSampleLogs,
     clearDemoLogs,
     showToast,
@@ -49,6 +50,8 @@ export const SettingsView: React.FC = () => {
   const [holidayEnd, setHolidayEnd] = useState('');
   const [icsFeedback, setIcsFeedback] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [autoLoadLegacy, setAutoLoadLegacy] = useState(false);
 
   const browserPushSupported =
     typeof window !== 'undefined' && 'Notification' in window;
@@ -136,22 +139,6 @@ export const SettingsView: React.FC = () => {
     showToast('CSV time logs exported');
   };
 
-  const handleRestoreJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const parsed = JSON.parse(await file.text());
-      if (!parsed.events || !parsed.settings) {
-        showToast('Invalid LifeHQ backup file');
-        return;
-      }
-      restoreState(parsed);
-    } catch {
-      showToast('Could not parse JSON backup');
-    }
-    e.target.value = '';
-  };
-
   return (
     <div className="space-y-6">
       <div>
@@ -172,8 +159,8 @@ export const SettingsView: React.FC = () => {
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                 {cloudUser
-                  ? `Signed in as ${cloudUser.email}. Private Firestore sync is active (${cloudSyncStatus}).`
-                  : 'Currently running in Local Device Mode (stored in this browser only — does not sync between devices until you sign in).'}
+                  ? `Signed in as ${cloudUser.email}. Isolated per-account Firestore sync is active (${cloudSyncStatus}).`
+                  : 'Sign in with a verified Google account to sync your private workspace across devices.'}
               </p>
             </div>
           </div>
@@ -306,8 +293,9 @@ export const SettingsView: React.FC = () => {
             Week A / B Rotation &amp; Holidays
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Default anchor: Monday 16 Nov 2026 = Week A. Suspending school
-            holidays hides school blocks without shifting the A/B cycle.
+            Configure which Monday anchors Week A or Week B. Adding school
+            holiday periods hides term-time blocks without shifting your A/B
+            cycle.
           </p>
 
           <div className="grid grid-cols-3 gap-3">
@@ -522,13 +510,49 @@ export const SettingsView: React.FC = () => {
           </p>
         </section>
 
-        {/* Data Export, Sample Logs & Reset */}
+        {/* Data Export, Migration & Workspace Reset */}
         <section className="rounded-2xl bg-white dark:bg-[#141b29] border border-slate-200/80 dark:border-slate-800/80 p-5 space-y-4">
           <h2 className="text-base font-semibold">
-            Backups, Exports &amp; Sample Data
+            Backups, Import &amp; Workspace Data
           </h2>
 
+          {legacyBackupInfo.exists && (
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="text-xs space-y-0.5">
+                <p className="font-semibold">
+                  Previous browser setup detected on this device
+                </p>
+                <p className="text-slate-500 dark:text-slate-400">
+                  {legacyBackupInfo.eventCount} events ·{' '}
+                  {legacyBackupInfo.habitCount} habits ·{' '}
+                  {legacyBackupInfo.goalCount} goals
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoLoadLegacy(true);
+                  setImportModalOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 whitespace-nowrap"
+              >
+                <Upload className="w-3.5 h-3.5" /> Preview &amp; import setup
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAutoLoadLegacy(false);
+                setImportModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 rounded-xl text-xs font-semibold bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 hover:opacity-90"
+            >
+              <Upload className="w-3.5 h-3.5" /> Import saved backup / personal
+              setup
+            </button>
             <button
               onClick={handleExportJSON}
               className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 rounded-xl text-xs font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700"
@@ -541,16 +565,19 @@ export const SettingsView: React.FC = () => {
             >
               <Download className="w-3.5 h-3.5" /> Export time logs CSV
             </button>
-            <label className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 rounded-xl text-xs font-medium border border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800">
-              <Upload className="w-3.5 h-3.5" /> Restore JSON
-              <input
-                type="file"
-                accept=".json,application/json"
-                onChange={handleRestoreJSON}
-                className="hidden"
-              />
-            </label>
           </div>
+
+          {state.migrationMeta?.personalImportCompletedAt && (
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Last imported:{' '}
+              <span className="font-mono">
+                {state.migrationMeta.personalImportCompletedAt.slice(0, 10)}
+              </span>
+              {state.migrationMeta.importedFrom
+                ? ` (${state.migrationMeta.importedFrom})`
+                : ''}
+            </p>
+          )}
 
           <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap gap-2">
             <button
@@ -570,18 +597,18 @@ export const SettingsView: React.FC = () => {
                 onClick={() => setConfirmReset(true)}
                 className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl text-xs font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
               >
-                <RotateCcw className="w-3.5 h-3.5" /> Reset initial schedule
+                <RotateCcw className="w-3.5 h-3.5" /> Reset workspace to empty
               </button>
             ) : (
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
-                    resetDemoData();
+                    void resetWorkspaceToEmpty();
                     setConfirmReset(false);
                   }}
                   className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-600 text-white"
                 >
-                  Confirm reset
+                  Confirm empty reset
                 </button>
                 <button
                   onClick={() => setConfirmReset(false)}
@@ -594,6 +621,12 @@ export const SettingsView: React.FC = () => {
           </div>
         </section>
       </div>
+
+      <ImportBackupModal
+        open={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        autoLoadLegacy={autoLoadLegacy}
+      />
     </div>
   );
 };

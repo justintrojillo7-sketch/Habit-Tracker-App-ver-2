@@ -38,6 +38,7 @@ import {
   timeToMinutes,
 } from '../utils/dateUtils';
 import { expandEventsForRange } from '../utils/recurrence';
+import { calculatePillarInsightsSummary } from '../utils/pillarUtils';
 
 type InsightsTab = 'analytics' | 'review';
 type RangePreset =
@@ -58,6 +59,7 @@ export const InsightsView: React.FC = () => {
     getCategoryMeta,
     saveWeeklyReview,
     setActiveSection,
+    openPillar,
     loadDemoSampleLogs,
   } = useLifeHQ();
 
@@ -142,9 +144,11 @@ export const InsightsView: React.FC = () => {
     if (cat === 'rest' && sub === 'Sleep') return true;
     if (
       cat === 'teaching' &&
-      (sub === 'Classroom teaching' ||
+      (sub === 'Core work' ||
+        sub === 'Classroom teaching' ||
+        sub === 'Administration' ||
         sub === 'School administration' ||
-        sub === 'ECT development')
+        sub.endsWith('development'))
     ) {
       return true;
     }
@@ -402,14 +406,14 @@ export const InsightsView: React.FC = () => {
         reviewMonday,
         state.settings
       )}): ${formatHoursDecimal(totalMins)} of confirmed activity recorded.`,
-      `Fitness: ${gymDone} of 4 target gym sessions completed.`,
-      `Behold: ${formatHoursDecimal(beholdMins)} logged${
+      `Fitness: ${gymDone} strength / conditioning session${gymDone === 1 ? '' : 's'} logged.`,
+      `${getCategoryMeta('behold').label}: ${formatHoursDecimal(beholdMins)} logged${
         beholdItems.length > 0
           ? ` (${Array.from(new Set(beholdItems)).slice(0, 3).join(', ')})`
           : ''
       }.`,
-      `Teaching preparation: ${prepDone} dedicated planning blocks confirmed.`,
-      `Faith & Ministry: ${
+      `${getCategoryMeta('teaching').label} preparation: ${prepDone} dedicated planning block${prepDone === 1 ? '' : 's'} confirmed.`,
+      `${getCategoryMeta('faith').label}: ${
         ministryDone.length > 0
           ? `${ministryDone.join(', ')} completed.`
           : 'No additional ministry blocks confirmed yet.'
@@ -430,6 +434,30 @@ export const InsightsView: React.FC = () => {
       factualLines,
     };
   }, [state.activityRecords, state.habitLogs, state.settings, reviewMonday]);
+
+  const pillarSummary = useMemo(
+    () =>
+      calculatePillarInsightsSummary({
+        startDate,
+        endDate,
+        activityRecords: state.activityRecords,
+        devotionEntries: state.devotionEntries,
+        bibleStudies: state.bibleStudies,
+        workoutLogs: state.workoutLogs,
+        cardioLogs: state.cardioLogs,
+        beholdWeeks: state.beholdWeeks,
+      }),
+    [
+      startDate,
+      endDate,
+      state.activityRecords,
+      state.devotionEntries,
+      state.bibleStudies,
+      state.workoutLogs,
+      state.cardioLogs,
+      state.beholdWeeks,
+    ]
+  );
 
   const activeConflicts =
     mode === 'planned'
@@ -681,6 +709,95 @@ export const InsightsView: React.FC = () => {
                   analytics.deduplicatedActualMinutes -
                     analytics.deduplicatedPlannedMinutes
                 )}
+              </p>
+            </div>
+          </div>
+
+          {/* Three-Pillar Recorded Indicators (100% Real Data) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-2xl bg-white dark:bg-[#141b29] border border-slate-200/80 dark:border-slate-800/80 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: getCategoryMeta('faith').colour }}
+                  />
+                  Faith Development
+                </span>
+                <button
+                  type="button"
+                  onClick={() => openPillar('faith')}
+                  className="text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white underline"
+                >
+                  Open
+                </button>
+              </div>
+              <p className="text-sm font-mono tabular-nums font-semibold">
+                {pillarSummary.faith.totalDevotionEntries} devotion check-ins ·{' '}
+                {pillarSummary.faith.completedStudies}/
+                {pillarSummary.faith.totalStudies} studies
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                {pillarSummary.faith.morningCount} morning ·{' '}
+                {pillarSummary.faith.eveningCount} evening · Active:{' '}
+                {pillarSummary.faith.activeStudyLabel}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-white dark:bg-[#141b29] border border-slate-200/80 dark:border-slate-800/80 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: getCategoryMeta('fitness').colour }}
+                  />
+                  Fitness &amp; Conditioning
+                </span>
+                <button
+                  type="button"
+                  onClick={() => openPillar('fitness')}
+                  className="text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white underline"
+                >
+                  Open
+                </button>
+              </div>
+              <p className="text-sm font-mono tabular-nums font-semibold">
+                {pillarSummary.fitness.strengthSessionsLogged} workouts ·{' '}
+                {pillarSummary.fitness.cardioEnduranceCount +
+                  pillarSummary.fitness.cardioSprintCount}{' '}
+                cardio
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                Volume {pillarSummary.fitness.totalSetVolumeKg.toLocaleString()}{' '}
+                kg · Actual {formatHoursDecimal(pillarSummary.fitness.actualMinutes)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-white dark:bg-[#141b29] border border-slate-200/80 dark:border-slate-800/80 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold flex items-center gap-2">
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{ backgroundColor: getCategoryMeta('behold').colour }}
+                  />
+                  Creative Craft &amp; Projects
+                </span>
+                <button
+                  type="button"
+                  onClick={() => openPillar('behold')}
+                  className="text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-white underline"
+                >
+                  Open
+                </button>
+              </div>
+              <p className="text-sm font-mono tabular-nums font-semibold">
+                {pillarSummary.behold.completedWeeks}/
+                {pillarSummary.behold.totalWeeks} weeks complete
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 font-mono tabular-nums">
+                {pillarSummary.behold.portfolioReadyCount} portfolio-ready ·{' '}
+                {pillarSummary.behold.clientMappedCount} client-linked ·{' '}
+                {formatHoursDecimal(pillarSummary.behold.actualMinutes)}
               </p>
             </div>
           </div>

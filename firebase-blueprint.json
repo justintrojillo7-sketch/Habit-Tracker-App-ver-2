@@ -15,6 +15,8 @@
         "notificationsEnabled": { "type": "boolean" },
         "reminderOptions": { "type": "object" },
         "categoryColours": { "type": "object" },
+        "schemaVersion": { "type": "number" },
+        "migrationMeta": { "type": "object" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["ownerId", "theme", "weekAnchorMonday", "weekAnchorType", "targetBedtime", "notificationsEnabled", "updatedAt"]
@@ -100,7 +102,7 @@
     },
     "Habit": {
       "title": "Habit",
-      "description": "Low-friction habit definition.",
+      "description": "Low-friction Atomic Habits definition with schedule, targets, cues, and archive state.",
       "type": "object",
       "properties": {
         "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
@@ -109,22 +111,40 @@
         "category": { "type": "string", "enum": ["teaching", "behold", "fitness", "faith", "personal", "rest"] },
         "frequency": { "type": "string", "enum": ["daily", "weekly", "custom"] },
         "weeklyTarget": { "type": "number" },
+        "daysOfWeek": { "type": "array" },
+        "targetMinutes": { "type": "number" },
+        "targetQuantity": { "type": "number" },
+        "targetUnit": { "type": "string", "maxLength": 40 },
+        "cue": { "type": "string", "maxLength": 200 },
+        "twoMinuteRule": { "type": "string", "maxLength": 200 },
+        "stackAnchorEventId": { "type": "string", "maxLength": 128 },
+        "stackAnchorLabel": { "type": "string", "maxLength": 160 },
+        "stackAction": { "type": "string", "maxLength": 200 },
+        "preferredWindowStart": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "preferredWindowEnd": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+        "linkedEventIds": { "type": "array" },
+        "templateKey": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
         "paused": { "type": "boolean" },
+        "archived": { "type": "boolean" },
         "notes": { "type": "string", "maxLength": 500 }
       },
       "required": ["ownerId", "id", "title", "category", "frequency", "weeklyTarget", "paused"]
     },
     "HabitLog": {
       "title": "HabitLog",
-      "description": "Daily habit completion or excused skip log.",
+      "description": "Daily habit completion, partial completion, skipped, excused, or two-minute starter attempt log.",
       "type": "object",
       "properties": {
         "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
-        "id": { "type": "string", "minLength": 1, "maxLength": 160, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "id": { "type": "string", "minLength": 1, "maxLength": 180, "pattern": "^[a-zA-Z0-9_\\-]+$" },
         "habitId": { "type": "string", "minLength": 1, "maxLength": 128 },
         "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
-        "status": { "type": "string", "enum": ["done", "skipped"] },
-        "source": { "type": "string", "enum": ["manual", "calendar"] }
+        "status": { "type": "string", "enum": ["done", "partial", "skipped", "excused", "starter"] },
+        "source": { "type": "string", "enum": ["manual", "calendar"] },
+        "notes": { "type": "string", "maxLength": 500 },
+        "actualValue": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 40 }
       },
       "required": ["ownerId", "id", "habitId", "date", "status"]
     },
@@ -182,6 +202,142 @@
         "linkedOccurrenceDate": { "type": "string", "maxLength": 10 }
       },
       "required": ["ownerId", "id", "isRunning", "accumulatedMs", "category", "subcategory", "title", "project", "notes"]
+    },
+    "DevotionEntry": {
+      "title": "DevotionEntry",
+      "description": "Morning and evening devotional reflection entry.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "routineType": { "type": "string", "enum": ["morning", "evening"] },
+        "hydrated": { "type": "boolean" },
+        "watchwordsOpened": { "type": "boolean" },
+        "scriptureRef": { "type": "string", "maxLength": 200 },
+        "reflection": { "type": "string", "maxLength": 2000 },
+        "prayerCompleted": { "type": "boolean" },
+        "journalThoughts": { "type": "string", "maxLength": 2000 },
+        "questions": { "type": "string", "maxLength": 1000 },
+        "gratitude": { "type": "string", "maxLength": 1000 },
+        "application": { "type": "string", "maxLength": 1000 },
+        "shortOrMoved": { "type": "boolean" },
+        "movedNote": { "type": "string", "maxLength": 500 },
+        "durationMinutes": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "id", "date", "routineType", "scriptureRef", "reflection", "prayerCompleted", "updatedAt"]
+    },
+    "BibleStudyNote": {
+      "title": "BibleStudyNote",
+      "description": "Extended Bible study workspace note and ordered study queue.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "book": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "passage": { "type": "string", "maxLength": 160 },
+        "status": { "type": "string", "enum": ["completed", "in-progress", "upcoming"] },
+        "orderIndex": { "type": "number" },
+        "readingProgress": { "type": "string", "maxLength": 300 },
+        "observations": { "type": "string", "maxLength": 4000 },
+        "historicalContext": { "type": "string", "maxLength": 4000 },
+        "theologicalInterpretation": { "type": "string", "maxLength": 4000 },
+        "crossReferences": { "type": "string", "maxLength": 2000 },
+        "practicalApplication": { "type": "string", "maxLength": 4000 },
+        "questions": { "type": "string", "maxLength": 2000 },
+        "prayerAndJournal": { "type": "string", "maxLength": 4000 },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "id", "book", "passage", "status", "orderIndex", "readingProgress", "observations", "historicalContext", "theologicalInterpretation", "crossReferences", "practicalApplication", "questions", "prayerAndJournal", "updatedAt"]
+    },
+    "WorkoutSessionLog": {
+      "title": "WorkoutSessionLog",
+      "description": "Upper/Lower strength workout session log with exercise sets, weights, reps, and recovery notes.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "sessionKey": { "type": "string", "enum": ["upper_a", "lower_a", "upper_b", "lower_b"] },
+        "sessionTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "linkedEventId": { "type": "string", "maxLength": 128 },
+        "durationMinutes": { "type": "number" },
+        "exercises": { "type": "array" },
+        "effortRpe": { "type": "number" },
+        "soreness": { "type": "number" },
+        "recoveryNotes": { "type": "string", "maxLength": 1000 },
+        "completed": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "id", "date", "sessionKey", "sessionTitle", "durationMinutes", "exercises", "completed", "updatedAt"]
+    },
+    "CardioSessionLog": {
+      "title": "CardioSessionLog",
+      "description": "Wednesday alternating Week A endurance or Week B sprint cardio session log.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "weekType": { "type": "string", "enum": ["A", "B"] },
+        "cardioType": { "type": "string", "enum": ["endurance", "sprint", "low_impact", "skipped"] },
+        "durationMinutes": { "type": "number" },
+        "distanceKm": { "type": "number" },
+        "averagePace": { "type": "string", "maxLength": 40 },
+        "sprintReps": { "type": "number" },
+        "accelerationSeconds": { "type": "number" },
+        "perceivedEffort": { "type": "number" },
+        "recoveryQuality": { "type": "string", "maxLength": 200 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "id", "date", "weekType", "cardioType", "durationMinutes", "updatedAt"]
+    },
+    "BeholdWeekItem": {
+      "title": "BeholdWeekItem",
+      "description": "Behold 12-week cinematography/directing curriculum week item, shot list, and reflections.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "weekNumber": { "type": "number" },
+        "monthPhase": { "type": "number" },
+        "monthTitle": { "type": "string", "maxLength": 120 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "challenge": { "type": "string", "maxLength": 500 },
+        "learningObjective": { "type": "string", "maxLength": 1000 },
+        "technicalFocus": { "type": "string", "maxLength": 500 },
+        "practicalExercise": { "type": "string", "maxLength": 1000 },
+        "shotList": { "type": "array" },
+        "linkedEventId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["not-started", "in-progress", "completed"] },
+        "projectLink": { "type": "string", "maxLength": 400 },
+        "clientProjectName": { "type": "string", "maxLength": 160 },
+        "reflectionWorked": { "type": "string", "maxLength": 1500 },
+        "reflectionDidntWork": { "type": "string", "maxLength": 1500 },
+        "reflectionImprove": { "type": "string", "maxLength": 1500 },
+        "portfolioReady": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 40 }
+      },
+      "required": ["ownerId", "id", "weekNumber", "monthPhase", "monthTitle", "title", "challenge", "learningObjective", "technicalFocus", "practicalExercise", "shotList", "status", "projectLink", "clientProjectName", "reflectionWorked", "reflectionDidntWork", "reflectionImprove", "portfolioReady", "updatedAt"]
+    },
+    "FitnessConfig": {
+      "title": "FitnessConfig",
+      "description": "Workout plan templates, rebuild phase configuration, protein targets, and volleyball mode.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "rebuildStartDate": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "proteinTargetMin": { "type": "number" },
+        "proteinTargetMax": { "type": "number" },
+        "dailyProteinLogs": { "type": "object" },
+        "volleyballCompetitiveMode": { "type": "boolean" },
+        "programmeReviewNotes": { "type": "string", "maxLength": 2000 },
+        "lastReviewDate": { "type": "string", "maxLength": 10 },
+        "workoutPlan": { "type": "array" }
+      },
+      "required": ["ownerId", "rebuildStartDate", "proteinTargetMin", "proteinTargetMax", "dailyProteinLogs", "volleyballCompetitiveMode", "programmeReviewNotes", "workoutPlan"]
     }
   },
   "firestore": {
@@ -217,9 +373,29 @@
       "schema": { "$ref": "#/entities/WeeklyReviewEntry" },
       "description": "Sunday weekly reflection entries."
     },
+    "/users/{userId}/devotionEntries/{entryId}": {
+      "schema": { "$ref": "#/entities/DevotionEntry" },
+      "description": "Morning and evening devotional logs."
+    },
+    "/users/{userId}/bibleStudies/{studyId}": {
+      "schema": { "$ref": "#/entities/BibleStudyNote" },
+      "description": "Extended Bible study notes and reading queue."
+    },
+    "/users/{userId}/workoutLogs/{logId}": {
+      "schema": { "$ref": "#/entities/WorkoutSessionLog" },
+      "description": "Logged Upper/Lower strength sessions."
+    },
+    "/users/{userId}/cardioLogs/{logId}": {
+      "schema": { "$ref": "#/entities/CardioSessionLog" },
+      "description": "Alternating endurance and sprint cardio logs."
+    },
+    "/users/{userId}/beholdWeeks/{weekId}": {
+      "schema": { "$ref": "#/entities/BeholdWeekItem" },
+      "description": "Structured creative craft week items and reflections."
+    },
     "/users/{userId}/runtime/{runtimeId}": {
       "schema": { "$ref": "#/entities/ActiveTimerState" },
-      "description": "Active stopwatch timer persistence."
+      "description": "Active stopwatch timer and fitnessConfig runtime state."
     }
   }
 }

@@ -4,26 +4,35 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { User } from 'firebase/auth';
-import { CATEGORIES, INITIAL_STATE } from '../data/seedData';
+import { CATEGORIES, createEmptyState } from '../data/seedData';
 import {
   ActiveTimerState,
   ActivityOutcomeStatus,
   ActivityRecord,
   AppSettings,
   AppState,
+  BeholdWeekItem,
+  BibleStudyNote,
   CalendarEvent,
+  CardioSessionLog,
   CategoryId,
+  DevotionEntry,
   EventException,
   EventOccurrence,
+  FitnessConfig,
   Goal,
   Habit,
+  HabitLog,
   HabitLogStatus,
   NavSection,
+  PillarTab,
   PriorityTask,
   WeeklyReviewEntry,
+  WorkoutSessionLog,
 } from '../types/lifehq';
 import {
   addDays,
@@ -36,19 +45,25 @@ import {
 } from '../utils/dateUtils';
 import { expandEventsForRange } from '../utils/recurrence';
 import {
-  loadLocalState,
-  resetLocalState,
-  saveLocalState,
+  clearLegacyLocalBackup,
+  inspectLegacyLocalBackup,
+  LegacyLocalBackupInfo,
+  loadUserCache,
+  saveUserCache,
 } from '../services/storage';
+import { ImportMergeMode } from '../services/importMerge';
 import {
-  loadUserWorkspace,
+  ensureEmptyWorkspaceInitialized,
   removeDoc,
+  replaceFullWorkspaceInCloud,
   saveFullWorkspaceToCloud,
   signInWithGoogle,
   signOutFirebase,
   subscribeAuth,
+  subscribeUserWorkspace,
   syncActiveTimer,
   syncDoc,
+  syncFitnessConfig,
   syncWorkspaceSettings,
 } from '../services/firebaseSync';
 
@@ -64,15 +79,23 @@ interface LifeHQContextValue {
   state: AppState;
   activeSection: NavSection;
   setActiveSection: (section: NavSection) => void;
+  pillarTab: PillarTab;
+  setPillarTab: (tab: PillarTab) => void;
+  openPillar: (tab: PillarTab) => void;
   isDark: boolean;
   toast: string | null;
   showToast: (msg: string) => void;
   storageError: string | null;
   cloudUser: User | null;
+  cloudAuthReady: boolean;
   cloudLoading: boolean;
+  cloudError: string | null;
   cloudSyncStatus: 'local-only' | 'synced' | 'syncing' | 'error';
   signInCloud: () => Promise<void>;
   signOutCloud: () => Promise<void>;
+  legacyBackupInfo: LegacyLocalBackupInfo;
+  refreshLegacyBackupInfo: () => void;
+  clearDetectedLegacyBackup: () => void;
   now: { date: string; time: string; minutes: number };
   reminders: InAppReminder[];
 
@@ -128,10 +151,32 @@ interface LifeHQContextValue {
     habitId: string,
     date: string,
     status: HabitLogStatus | 'clear',
-    source?: 'manual' | 'calendar'
+    source?: 'manual' | 'calendar',
+    notes?: string,
+    actualValue?: number
+  ) => void;
+  logStarterAttempt: (
+    habitId: string,
+    date: string,
+    notes?: string,
+    durationSeconds?: number
+  ) => void;
+  clearStarterAttempt: (habitId: string, date: string) => void;
+  updateHabitStack: (
+    habitId: string,
+    stack: {
+      stackAnchorEventId?: string;
+      stackAnchorLabel?: string;
+      stackAction?: string;
+      preferredWindowStart?: string;
+      preferredWindowEnd?: string;
+    } | null
   ) => void;
   toggleHabitPause: (habitId: string) => void;
+  toggleHabitArchive: (habitId: string) => void;
   addHabit: (habit: Omit<Habit, 'id'>) => void;
+  upsertHabit: (habit: Habit, linkedEventIds?: string[]) => void;
+  deleteHabit: (habitId: string) => void;
 
   toggleMilestone: (goalId: string, milestoneId: string) => void;
   upsertGoal: (goal: Goal) => void;
@@ -139,9 +184,23 @@ interface LifeHQContextValue {
 
   saveWeeklyReview: (entry: Omit<WeeklyReviewEntry, 'savedAt'>) => void;
 
+  upsertDevotionEntry: (entry: DevotionEntry) => void;
+  upsertBibleStudy: (study: BibleStudyNote) => void;
+  deleteBibleStudy: (id: string) => void;
+  upsertWorkoutLog: (log: WorkoutSessionLog, recordInTimeline?: boolean) => void;
+  deleteWorkoutLog: (id: string) => void;
+  upsertCardioLog: (log: CardioSessionLog, recordInTimeline?: boolean) => void;
+  deleteCardioLog: (id: string) => void;
+  updateFitnessConfig: (patch: Partial<FitnessConfig>) => void;
+  logDailyProtein: (date: string, grams: number | null) => void;
+  upsertBeholdWeek: (week: BeholdWeekItem) => void;
+
   updateSettings: (patch: Partial<AppSettings>) => void;
-  restoreState: (newState: AppState) => void;
-  resetDemoData: () => void;
+  applyImportedWorkspace: (
+    nextState: AppState,
+    mode: ImportMergeMode
+  ) => Promise<boolean>;
+  resetWorkspaceToEmpty: () => Promise<void>;
   loadDemoSampleLogs: () => void;
   clearDemoLogs: () => void;
 }
@@ -151,21 +210,31 @@ const LifeHQContext = createContext<LifeHQContextValue | null>(null);
 export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
-  const [state, setState] = useState<AppState>(() => loadLocalState());
+  const [state, setState] = useState<AppState>(() => createEmptyState());
   const [activeSection, setActiveSection] = useState<NavSection>('today');
+  const [pillarTab, setPillarTab] = useState<PillarTab>('faith');
   const [toast, setToast] = useState<string | null>(null);
   const [storageError, setStorageError] = useState<string | null>(null);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
+  const [cloudAuthReady, setCloudAuthReady] = useState<boolean>(false);
   const [cloudLoading, setCloudLoading] = useState<boolean>(true);
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const [cloudSyncStatus, setCloudSyncStatus] = useState<
     'local-only' | 'synced' | 'syncing' | 'error'
   >('local-only');
+  const [legacyBackupInfo, setLegacyBackupInfo] = useState<LegacyLocalBackupInfo>(
+    () => inspectLegacyLocalBackup()
+  );
   const [now, setNow] = useState(() => getLondonNow());
   const [systemDark, setSystemDark] = useState(() =>
     typeof window !== 'undefined'
       ? window.matchMedia('(prefers-color-scheme: dark)').matches
       : false
   );
+
+  const workspaceUnsubRef = useRef<(() => void) | null>(null);
+  const verifiedUidRef = useRef<string | null>(null);
+  const initializingRootUidRef = useRef<string | null>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(getLondonNow()), 30000);
@@ -187,11 +256,13 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
     document.documentElement.classList.toggle('dark', isDark);
   }, [isDark]);
 
-  // Always save to localStorage as immediate cache
+  // Save per-UID cache only for the active verified user
   useEffect(() => {
-    const res = saveLocalState(state);
+    if (!cloudUser || !cloudUser.emailVerified) return;
+    if (verifiedUidRef.current !== cloudUser.uid) return;
+    const res = saveUserCache(cloudUser.uid, state);
     setStorageError(res.ok ? null : res.error ?? 'Storage failed');
-  }, [state]);
+  }, [cloudUser, state]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -200,66 +271,130 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
     }, 3200);
   }, []);
 
-  // Auth listener & initial cloud hydration
+  const refreshLegacyBackupInfo = useCallback(() => {
+    setLegacyBackupInfo(inspectLegacyLocalBackup());
+  }, []);
+
+  const clearDetectedLegacyBackup = useCallback(() => {
+    clearLegacyLocalBackup();
+    setLegacyBackupInfo(inspectLegacyLocalBackup());
+    showToast('Legacy browser data removed from this device');
+  }, [showToast]);
+
+  // Auth listener & real-time Firestore workspace subscription
   useEffect(() => {
-    return subscribeAuth(async (user) => {
+    const unsubAuth = subscribeAuth((user) => {
+      if (workspaceUnsubRef.current) {
+        workspaceUnsubRef.current();
+        workspaceUnsubRef.current = null;
+      }
+      initializingRootUidRef.current = null;
       setCloudUser(user);
-      if (!user) {
+      setCloudError(null);
+
+      if (!user || !user.emailVerified) {
+        verifiedUidRef.current = null;
+        setState(createEmptyState());
         setCloudSyncStatus('local-only');
         setCloudLoading(false);
+        setCloudAuthReady(true);
         return;
       }
 
+      verifiedUidRef.current = user.uid;
+      setLegacyBackupInfo(inspectLegacyLocalBackup());
+      const cached = loadUserCache(user.uid);
+      setState(cached ?? createEmptyState());
       setCloudLoading(true);
       setCloudSyncStatus('syncing');
-      try {
-        const remote = await loadUserWorkspace(user.uid);
-        if (remote) {
-          setState(remote);
+      setCloudAuthReady(true);
+
+      workspaceUnsubRef.current = subscribeUserWorkspace(user.uid, {
+        onState: (remoteState) => {
+          if (verifiedUidRef.current !== user.uid) return;
+          setState(remoteState);
+          saveUserCache(user.uid, remoteState);
           setCloudSyncStatus('synced');
-        } else {
-          // Seed cloud workspace with current state on first Google sign-in
-          const localCurrent = loadLocalState();
-          await saveFullWorkspaceToCloud(user.uid, localCurrent);
-          setCloudSyncStatus('synced');
-          showToast('Workspace synced to your cloud account');
-        }
-      } catch (err) {
-        console.error('Failed to sync cloud workspace:', err);
-        setCloudSyncStatus('error');
-        setStorageError(
-          'Could not connect to cloud sync; changes are saved locally on this device.'
-        );
-      } finally {
-        setCloudLoading(false);
-      }
+          setCloudLoading(false);
+          setCloudError(null);
+          setStorageError(null);
+        },
+        onMissingRoot: () => {
+          if (verifiedUidRef.current !== user.uid) return;
+          if (initializingRootUidRef.current === user.uid) return;
+          initializingRootUidRef.current = user.uid;
+          void ensureEmptyWorkspaceInitialized(user.uid).catch((err) => {
+            console.error('Failed to initialize workspace:', err);
+            initializingRootUidRef.current = null;
+            setCloudSyncStatus('error');
+            setCloudError('Could not initialize your workspace in Firestore.');
+            setCloudLoading(false);
+          });
+        },
+        onError: (err) => {
+          if (verifiedUidRef.current !== user.uid) return;
+          console.error('Workspace subscription error:', err);
+          setCloudSyncStatus('error');
+          setCloudError(
+            'Could not sync with Firestore. Check your connection or account access.'
+          );
+          setStorageError(
+            'Cloud sync error — displaying last cached data for your account.'
+          );
+          setCloudLoading(false);
+        },
+      });
     });
-  }, [showToast]);
+
+    return () => {
+      unsubAuth();
+      if (workspaceUnsubRef.current) {
+        workspaceUnsubRef.current();
+        workspaceUnsubRef.current = null;
+      }
+    };
+  }, []);
 
   const signInCloud = useCallback(async () => {
+    setCloudError(null);
     try {
       await signInWithGoogle();
     } catch (err) {
       console.error('Google sign-in error:', err);
+      setCloudError('Google sign-in was cancelled or blocked by your browser.');
       showToast('Sign-in cancelled or blocked');
     }
   }, [showToast]);
 
   const signOutCloud = useCallback(async () => {
+    if (workspaceUnsubRef.current) {
+      workspaceUnsubRef.current();
+      workspaceUnsubRef.current = null;
+    }
+    verifiedUidRef.current = null;
+    initializingRootUidRef.current = null;
     await signOutFirebase();
+    setState(createEmptyState());
     setCloudSyncStatus('local-only');
-    showToast('Signed out — local device mode active');
+    setCloudError(null);
+    setStorageError(null);
+    setActiveSection('today');
+    showToast('Signed out');
   }, [showToast]);
 
   const runCloudOp = useCallback(
     (fn: (uid: string) => Promise<void>) => {
-      if (!cloudUser) return;
+      if (!cloudUser || !cloudUser.emailVerified) return;
       setCloudSyncStatus('syncing');
       fn(cloudUser.uid)
-        .then(() => setCloudSyncStatus('synced'))
+        .then(() => {
+          setCloudSyncStatus('synced');
+          setCloudError(null);
+        })
         .catch((err) => {
           console.error('Cloud sync error:', err);
           setCloudSyncStatus('error');
+          setCloudError('A change could not be synced to Firestore.');
         });
     },
     [cloudUser]
@@ -286,7 +421,48 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
         const events = exists
           ? prev.events.map((e) => (e.id === event.id ? event : e))
           : [...prev.events, event];
-        return { ...prev, events };
+
+        const habits = prev.habits.map((h) => {
+          const currentlyIncludes = Boolean(h.linkedEventIds?.includes(event.id));
+          const shouldInclude = event.linkedHabitId === h.id;
+          if (shouldInclude && !currentlyIncludes) {
+            const nextIds = [...(h.linkedEventIds ?? []), event.id];
+            const updatedHabit = { ...h, linkedEventIds: nextIds };
+            runCloudOp((uid) =>
+              syncDoc(
+                uid,
+                'habits',
+                h.id,
+                updatedHabit as unknown as Record<string, unknown>
+              )
+            );
+            return updatedHabit;
+          }
+          if (!shouldInclude && currentlyIncludes && exists) {
+            // Only remove if user explicitly changed/cleared linkedHabitId on existing event
+            const prevEvent = prev.events.find((e) => e.id === event.id);
+            if (prevEvent && prevEvent.linkedHabitId !== event.linkedHabitId) {
+              const nextIds = (h.linkedEventIds ?? []).filter(
+                (id) => id !== event.id
+              );
+              const updatedHabit = { ...h };
+              if (nextIds.length > 0) updatedHabit.linkedEventIds = nextIds;
+              else delete updatedHabit.linkedEventIds;
+              runCloudOp((uid) =>
+                syncDoc(
+                  uid,
+                  'habits',
+                  h.id,
+                  updatedHabit as unknown as Record<string, unknown>
+                )
+              );
+              return updatedHabit;
+            }
+          }
+          return h;
+        });
+
+        return { ...prev, events, habits };
       });
       runCloudOp((uid) => syncDoc(uid, 'events', event.id, event as unknown as Record<string, unknown>));
       showToast('Event saved');
@@ -296,10 +472,29 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const deleteEvent = useCallback(
     (eventId: string) => {
-      setState((prev) => ({
-        ...prev,
-        events: prev.events.filter((e) => e.id !== eventId),
-      }));
+      setState((prev) => {
+        const habits = prev.habits.map((h) => {
+          if (!h.linkedEventIds?.includes(eventId)) return h;
+          const nextIds = h.linkedEventIds.filter((id) => id !== eventId);
+          const updatedHabit = { ...h };
+          if (nextIds.length > 0) updatedHabit.linkedEventIds = nextIds;
+          else delete updatedHabit.linkedEventIds;
+          runCloudOp((uid) =>
+            syncDoc(
+              uid,
+              'habits',
+              h.id,
+              updatedHabit as unknown as Record<string, unknown>
+            )
+          );
+          return updatedHabit;
+        });
+        return {
+          ...prev,
+          events: prev.events.filter((e) => e.id !== eventId),
+          habits,
+        };
+      });
       runCloudOp((uid) => removeDoc(uid, 'events', eventId));
       showToast('Event deleted');
     },
@@ -394,33 +589,51 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
         );
 
         let habitLogs = prev.habitLogs;
-        if (occ.linkedHabitId) {
-          const logId = `${occ.linkedHabitId}_${occ.date}`;
-          if (status === 'completed' || status === 'partial') {
-            const newLog = {
-              id: logId,
-              habitId: occ.linkedHabitId,
-              date: occ.date,
-              status: 'done' as const,
-              source: 'calendar' as const,
-            };
-            const exists = habitLogs.some((l) => l.id === logId);
-            habitLogs = exists
-              ? habitLogs.map((l) => (l.id === logId ? newLog : l))
-              : [...habitLogs, newLog];
-            runCloudOp((uid) => syncDoc(uid, 'habitLogs', logId, newLog));
-          } else if (status === 'cancelled') {
-            const exists = habitLogs.some((l) => l.id === logId);
-            if (!exists) {
-              const newLog = {
+        const matchedHabitIds = new Set<string>();
+        if (occ.linkedHabitId) matchedHabitIds.add(occ.linkedHabitId);
+        for (const h of prev.habits) {
+          if (!h.archived && h.linkedEventIds?.includes(occ.eventId)) {
+            matchedHabitIds.add(h.id);
+          }
+        }
+
+        if (matchedHabitIds.size > 0) {
+          for (const habitId of matchedHabitIds) {
+            const logId = `${habitId}_${occ.date}`;
+            let mappedStatus: HabitLogStatus | null = null;
+            let autoNote: string | undefined;
+            if (status === 'completed') mappedStatus = 'done';
+            else if (status === 'partial') mappedStatus = 'partial';
+            else if (status === 'cancelled') {
+              mappedStatus = 'excused';
+              autoNote = 'Calendar commitment cancelled';
+            } else if (status === 'skipped') {
+              mappedStatus = 'skipped';
+            }
+
+            if (mappedStatus) {
+              const existingLog = habitLogs.find((l) => l.id === logId);
+              const newLog: HabitLog = {
                 id: logId,
-                habitId: occ.linkedHabitId,
+                habitId,
                 date: occ.date,
-                status: 'skipped' as const,
-                source: 'calendar' as const,
+                status: mappedStatus,
+                source: 'calendar',
+                ...(autoNote ? { notes: autoNote } : existingLog?.notes ? { notes: existingLog.notes } : {}),
+                ...(actualMinutes > 0 ? { actualValue: actualMinutes } : {}),
+                updatedAt: nowIso,
               };
-              habitLogs = [...habitLogs, newLog];
-              runCloudOp((uid) => syncDoc(uid, 'habitLogs', logId, newLog));
+              habitLogs = existingLog
+                ? habitLogs.map((l) => (l.id === logId ? newLog : l))
+                : [...habitLogs, newLog];
+              runCloudOp((uid) =>
+                syncDoc(
+                  uid,
+                  'habitLogs',
+                  logId,
+                  newLog as unknown as Record<string, unknown>
+                )
+              );
             }
           }
         }
@@ -473,8 +686,31 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
         if (target) {
           runCloudOp((uid) => removeDoc(uid, 'activityRecords', target.id));
         }
+        const linkedHabitIds = new Set<string>();
+        const ev = prev.events.find((e) => e.id === eventId);
+        if (ev?.linkedHabitId) linkedHabitIds.add(ev.linkedHabitId);
+        for (const h of prev.habits) {
+          if (h.linkedEventIds?.includes(eventId)) linkedHabitIds.add(h.id);
+        }
+        const targetDate = target?.date ?? occurrenceDate;
+        const removedLogIds = new Set<string>();
+        const habitLogs = prev.habitLogs.filter((l) => {
+          if (
+            l.source === 'calendar' &&
+            l.date === targetDate &&
+            linkedHabitIds.has(l.habitId)
+          ) {
+            removedLogIds.add(l.id);
+            return false;
+          }
+          return true;
+        });
+        removedLogIds.forEach((id) =>
+          runCloudOp((uid) => removeDoc(uid, 'habitLogs', id))
+        );
         return {
           ...prev,
+          habitLogs,
           activityRecords: prev.activityRecords.filter(
             (r) =>
               !(
@@ -822,7 +1058,9 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
       habitId: string,
       date: string,
       status: HabitLogStatus | 'clear',
-      source: 'manual' | 'calendar' = 'manual'
+      source: 'manual' | 'calendar' = 'manual',
+      notes?: string,
+      actualValue?: number
     ) => {
       const id = `${habitId}_${date}`;
       setState((prev) => {
@@ -831,8 +1069,27 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
           runCloudOp((uid) => removeDoc(uid, 'habitLogs', id));
           return { ...prev, habitLogs: filtered };
         }
-        const entry = { id, habitId, date, status, source };
-        runCloudOp((uid) => syncDoc(uid, 'habitLogs', id, entry));
+        const trimmedNote = notes?.trim();
+        const entry: HabitLog = {
+          id,
+          habitId,
+          date,
+          status,
+          source,
+          ...(trimmedNote ? { notes: trimmedNote.slice(0, 500) } : {}),
+          ...(actualValue !== undefined && actualValue >= 0
+            ? { actualValue }
+            : {}),
+          updatedAt: new Date().toISOString(),
+        };
+        runCloudOp((uid) =>
+          syncDoc(
+            uid,
+            'habitLogs',
+            id,
+            entry as unknown as Record<string, unknown>
+          )
+        );
         return {
           ...prev,
           habitLogs: [...filtered, entry],
@@ -840,6 +1097,111 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     },
     [runCloudOp]
+  );
+
+  const logStarterAttempt = useCallback(
+    (
+      habitId: string,
+      date: string,
+      notes?: string,
+      durationSeconds?: number
+    ) => {
+      const id = `${habitId}_${date}_starter`;
+      const trimmedNote = notes?.trim();
+      const entry: HabitLog = {
+        id,
+        habitId,
+        date,
+        status: 'starter',
+        source: 'manual',
+        ...(trimmedNote ? { notes: trimmedNote.slice(0, 500) } : {}),
+        ...(durationSeconds !== undefined && durationSeconds >= 0
+          ? { actualValue: Math.min(10000, Math.round(durationSeconds)) }
+          : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      setState((prev) => ({
+        ...prev,
+        habitLogs: [...prev.habitLogs.filter((l) => l.id !== id), entry],
+      }));
+      runCloudOp((uid) =>
+        syncDoc(
+          uid,
+          'habitLogs',
+          id,
+          entry as unknown as Record<string, unknown>
+        )
+      );
+      showToast('Two-minute starter attempt recorded');
+    },
+    [runCloudOp, showToast]
+  );
+
+  const clearStarterAttempt = useCallback(
+    (habitId: string, date: string) => {
+      const id = `${habitId}_${date}_starter`;
+      setState((prev) => ({
+        ...prev,
+        habitLogs: prev.habitLogs.filter((l) => l.id !== id),
+      }));
+      runCloudOp((uid) => removeDoc(uid, 'habitLogs', id));
+    },
+    [runCloudOp]
+  );
+
+  const updateHabitStack: LifeHQContextValue['updateHabitStack'] = useCallback(
+    (habitId, stack) => {
+      setState((prev) => {
+        let updated: Habit | null = null;
+        const habits = prev.habits.map((h) => {
+          if (h.id !== habitId) return h;
+          const next = { ...h };
+          if (!stack) {
+            delete next.stackAnchorEventId;
+            delete next.stackAnchorLabel;
+            delete next.stackAction;
+            delete next.preferredWindowStart;
+            delete next.preferredWindowEnd;
+          } else {
+            if (stack.stackAnchorEventId)
+              next.stackAnchorEventId = stack.stackAnchorEventId;
+            else delete next.stackAnchorEventId;
+
+            if (stack.stackAnchorLabel?.trim())
+              next.stackAnchorLabel = stack.stackAnchorLabel.trim().slice(0, 160);
+            else delete next.stackAnchorLabel;
+
+            if (stack.stackAction?.trim())
+              next.stackAction = stack.stackAction.trim().slice(0, 200);
+            else delete next.stackAction;
+
+            if (stack.preferredWindowStart)
+              next.preferredWindowStart = stack.preferredWindowStart;
+            else delete next.preferredWindowStart;
+
+            if (stack.preferredWindowEnd)
+              next.preferredWindowEnd = stack.preferredWindowEnd;
+            else delete next.preferredWindowEnd;
+          }
+          updated = next;
+          return next;
+        });
+        if (updated) {
+          const copy = updated;
+          runCloudOp((uid) =>
+            syncDoc(
+              uid,
+              'habits',
+              habitId,
+              copy as unknown as Record<string, unknown>
+            )
+          );
+        }
+        return { ...prev, habits };
+      });
+      showToast(stack ? 'Habit stack updated' : 'Habit stack link removed');
+    },
+    [runCloudOp, showToast]
   );
 
   const toggleHabitPause = useCallback(
@@ -868,9 +1230,42 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
     [runCloudOp]
   );
 
+  const toggleHabitArchive = useCallback(
+    (habitId: string) => {
+      let nowArchived = false;
+      setState((prev) => {
+        let updated: Habit | null = null;
+        const habits = prev.habits.map((h) => {
+          if (h.id !== habitId) return h;
+          nowArchived = !Boolean(h.archived);
+          updated = { ...h, archived: nowArchived };
+          return updated;
+        });
+        if (updated) {
+          const copy = updated;
+          runCloudOp((uid) =>
+            syncDoc(
+              uid,
+              'habits',
+              habitId,
+              copy as unknown as Record<string, unknown>
+            )
+          );
+        }
+        return { ...prev, habits };
+      });
+      showToast(nowArchived ? 'Habit archived' : 'Habit restored');
+    },
+    [runCloudOp, showToast]
+  );
+
   const addHabit = useCallback(
     (habit: Omit<Habit, 'id'>) => {
-      const created: Habit = { ...habit, id: `habit-${Date.now()}` };
+      const created: Habit = {
+        ...habit,
+        id: `habit-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        createdAt: habit.createdAt ?? getLondonNow().date,
+      };
       setState((prev) => ({ ...prev, habits: [...prev.habits, created] }));
       runCloudOp((uid) =>
         syncDoc(
@@ -881,6 +1276,102 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
         )
       );
       showToast('Habit added');
+    },
+    [runCloudOp, showToast]
+  );
+
+  const upsertHabit = useCallback(
+    (habit: Habit, linkedEventIds?: string[]) => {
+      const cleanHabit: Habit = {
+        ...habit,
+        linkedEventIds: linkedEventIds ?? habit.linkedEventIds,
+      };
+      setState((prev) => {
+        const exists = prev.habits.some((h) => h.id === cleanHabit.id);
+        const habits = exists
+          ? prev.habits.map((h) => (h.id === cleanHabit.id ? cleanHabit : h))
+          : [...prev.habits, cleanHabit];
+
+        let events = prev.events;
+        if (linkedEventIds !== undefined) {
+          const linkSet = new Set(linkedEventIds);
+          events = prev.events.map((ev) => {
+            const shouldLink = linkSet.has(ev.id);
+            const currentlyLinkedHere = ev.linkedHabitId === cleanHabit.id;
+            if (shouldLink && !currentlyLinkedHere) {
+              const updatedEv = { ...ev, linkedHabitId: cleanHabit.id };
+              runCloudOp((uid) =>
+                syncDoc(
+                  uid,
+                  'events',
+                  ev.id,
+                  updatedEv as unknown as Record<string, unknown>
+                )
+              );
+              return updatedEv;
+            }
+            if (!shouldLink && currentlyLinkedHere) {
+              const updatedEv = { ...ev };
+              delete updatedEv.linkedHabitId;
+              runCloudOp((uid) =>
+                syncDoc(
+                  uid,
+                  'events',
+                  ev.id,
+                  updatedEv as unknown as Record<string, unknown>
+                )
+              );
+              return updatedEv;
+            }
+            return ev;
+          });
+        }
+
+        return { ...prev, habits, events };
+      });
+      runCloudOp((uid) =>
+        syncDoc(
+          uid,
+          'habits',
+          cleanHabit.id,
+          cleanHabit as unknown as Record<string, unknown>
+        )
+      );
+      showToast('Habit saved');
+    },
+    [runCloudOp, showToast]
+  );
+
+  const deleteHabit = useCallback(
+    (habitId: string) => {
+      setState((prev) => {
+        const logsToDelete = prev.habitLogs.filter((l) => l.habitId === habitId);
+        logsToDelete.forEach((l) =>
+          runCloudOp((uid) => removeDoc(uid, 'habitLogs', l.id))
+        );
+        const events = prev.events.map((ev) => {
+          if (ev.linkedHabitId !== habitId) return ev;
+          const updated = { ...ev };
+          delete updated.linkedHabitId;
+          runCloudOp((uid) =>
+            syncDoc(
+              uid,
+              'events',
+              ev.id,
+              updated as unknown as Record<string, unknown>
+            )
+          );
+          return updated;
+        });
+        return {
+          ...prev,
+          habits: prev.habits.filter((h) => h.id !== habitId),
+          habitLogs: prev.habitLogs.filter((l) => l.habitId !== habitId),
+          events,
+        };
+      });
+      runCloudOp((uid) => removeDoc(uid, 'habits', habitId));
+      showToast('Habit deleted');
     },
     [runCloudOp, showToast]
   );
@@ -976,33 +1467,429 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
     [runCloudOp, showToast]
   );
 
+  // ========================
+  // PILLARS: FAITH, FITNESS & BEHOLD
+  // ========================
+  const openPillar = useCallback((tab: PillarTab) => {
+    setPillarTab(tab);
+    setActiveSection('pillars');
+  }, []);
+
+  const upsertDevotionEntry = useCallback(
+    (entry: DevotionEntry) => {
+      const normalized: DevotionEntry = {
+        ...entry,
+        updatedAt: new Date().toISOString(),
+      };
+      setState((prev) => {
+        const exists = prev.devotionEntries.some((d) => d.id === normalized.id);
+        return {
+          ...prev,
+          devotionEntries: exists
+            ? prev.devotionEntries.map((d) =>
+                d.id === normalized.id ? normalized : d
+              )
+            : [normalized, ...prev.devotionEntries],
+        };
+      });
+      runCloudOp((uid) =>
+        syncDoc(
+          uid,
+          'devotionEntries',
+          normalized.id,
+          normalized as unknown as Record<string, unknown>
+        )
+      );
+      showToast(
+        normalized.routineType === 'morning'
+          ? 'Morning reflection saved'
+          : 'Evening devotional saved'
+      );
+    },
+    [runCloudOp, showToast]
+  );
+
+  const upsertBibleStudy = useCallback(
+    (study: BibleStudyNote) => {
+      const normalized: BibleStudyNote = {
+        ...study,
+        updatedAt: new Date().toISOString(),
+      };
+      setState((prev) => {
+        const exists = prev.bibleStudies.some((s) => s.id === normalized.id);
+        return {
+          ...prev,
+          bibleStudies: exists
+            ? prev.bibleStudies.map((s) =>
+                s.id === normalized.id ? normalized : s
+              )
+            : [...prev.bibleStudies, normalized],
+        };
+      });
+      runCloudOp((uid) =>
+        syncDoc(
+          uid,
+          'bibleStudies',
+          normalized.id,
+          normalized as unknown as Record<string, unknown>
+        )
+      );
+      showToast(`Bible study saved: ${normalized.book}`);
+    },
+    [runCloudOp, showToast]
+  );
+
+  const deleteBibleStudy = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        bibleStudies: prev.bibleStudies.filter((s) => s.id !== id),
+      }));
+      runCloudOp((uid) => removeDoc(uid, 'bibleStudies', id));
+      showToast('Study entry removed');
+    },
+    [runCloudOp, showToast]
+  );
+
+  const upsertWorkoutLog = useCallback(
+    (log: WorkoutSessionLog, recordInTimeline = false) => {
+      const nowIso = new Date().toISOString();
+      const normalized: WorkoutSessionLog = {
+        ...log,
+        updatedAt: nowIso,
+      };
+      setState((prev) => {
+        const exists = prev.workoutLogs.some((w) => w.id === normalized.id);
+        const workoutLogs = exists
+          ? prev.workoutLogs.map((w) =>
+              w.id === normalized.id ? normalized : w
+            )
+          : [normalized, ...prev.workoutLogs];
+
+        let activityRecords = prev.activityRecords;
+        if (recordInTimeline && normalized.completed) {
+          const recId = `act-wo-${normalized.id}`;
+          const existingScheduled = normalized.linkedEventId
+            ? prev.activityRecords.find(
+                (r) =>
+                  r.sourceType === 'scheduled' &&
+                  r.eventId === normalized.linkedEventId &&
+                  r.occurrenceDate === normalized.date
+              )
+            : undefined;
+          const existingDirect = prev.activityRecords.find(
+            (r) => r.id === recId
+          );
+          const targetRec = existingScheduled ?? existingDirect;
+          const mins = Math.max(15, Math.min(240, normalized.durationMinutes));
+          const linkedEv = normalized.linkedEventId
+            ? prev.events.find((e) => e.id === normalized.linkedEventId)
+            : undefined;
+          const startTime = linkedEv?.startTime ?? '16:15';
+          const endTime = minutesToTime(timeToMinutes(startTime) + mins);
+          const nextRec: ActivityRecord = targetRec
+            ? {
+                ...targetRec,
+                actualMinutes: mins,
+                status: 'completed',
+                title: normalized.sessionTitle,
+                notes: normalized.recoveryNotes || targetRec.notes,
+                updatedAt: nowIso,
+              }
+            : {
+                id: recId,
+                sourceType: normalized.linkedEventId ? 'scheduled' : 'manual',
+                ...(normalized.linkedEventId
+                  ? {
+                      eventId: normalized.linkedEventId,
+                      occurrenceDate: normalized.date,
+                    }
+                  : {}),
+                date: normalized.date,
+                startTime,
+                endTime,
+                actualMinutes: mins,
+                status: 'completed',
+                category: 'fitness',
+                subcategory: 'Strength training',
+                title: normalized.sessionTitle,
+                ...(normalized.recoveryNotes
+                  ? { notes: normalized.recoveryNotes }
+                  : {}),
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              };
+          activityRecords = targetRec
+            ? prev.activityRecords.map((r) =>
+                r.id === targetRec.id ? nextRec : r
+              )
+            : [nextRec, ...prev.activityRecords];
+          runCloudOp((uid) =>
+            syncDoc(
+              uid,
+              'activityRecords',
+              nextRec.id,
+              nextRec as unknown as Record<string, unknown>
+            )
+          );
+        }
+
+        return { ...prev, workoutLogs, activityRecords };
+      });
+      runCloudOp((uid) =>
+        syncDoc(
+          uid,
+          'workoutLogs',
+          normalized.id,
+          normalized as unknown as Record<string, unknown>
+        )
+      );
+      showToast(`Workout saved: ${normalized.sessionTitle}`);
+    },
+    [runCloudOp, showToast]
+  );
+
+  const deleteWorkoutLog = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        workoutLogs: prev.workoutLogs.filter((w) => w.id !== id),
+      }));
+      runCloudOp((uid) => removeDoc(uid, 'workoutLogs', id));
+      showToast('Workout log removed');
+    },
+    [runCloudOp, showToast]
+  );
+
+  const upsertCardioLog = useCallback(
+    (log: CardioSessionLog, recordInTimeline = false) => {
+      const nowIso = new Date().toISOString();
+      const normalized: CardioSessionLog = {
+        ...log,
+        updatedAt: nowIso,
+      };
+      setState((prev) => {
+        const exists = prev.cardioLogs.some((c) => c.id === normalized.id);
+        const cardioLogs = exists
+          ? prev.cardioLogs.map((c) =>
+              c.id === normalized.id ? normalized : c
+            )
+          : [normalized, ...prev.cardioLogs];
+
+        let activityRecords = prev.activityRecords;
+        if (recordInTimeline && normalized.cardioType !== 'skipped') {
+          const recId = `act-cardio-${normalized.id}`;
+          const linkedEventId =
+            normalized.weekType === 'A' ? 'wed-cardio-a' : 'wed-cardio-b';
+          const existingScheduled = prev.activityRecords.find(
+            (r) =>
+              r.sourceType === 'scheduled' &&
+              r.eventId === linkedEventId &&
+              r.occurrenceDate === normalized.date
+          );
+          const existingDirect = prev.activityRecords.find(
+            (r) => r.id === recId
+          );
+          const targetRec = existingScheduled ?? existingDirect;
+          const mins = Math.max(10, Math.min(180, normalized.durationMinutes));
+          const title =
+            normalized.cardioType === 'endurance'
+              ? 'Wednesday Endurance Cardio (Week A)'
+              : normalized.cardioType === 'sprint'
+              ? 'Wednesday Sprint Development (Week B)'
+              : 'Wednesday Low-Impact Conditioning';
+          const nextRec: ActivityRecord = targetRec
+            ? {
+                ...targetRec,
+                actualMinutes: mins,
+                status: 'completed',
+                title,
+                notes: normalized.notes || targetRec.notes,
+                updatedAt: nowIso,
+              }
+            : {
+                id: recId,
+                sourceType: 'scheduled',
+                eventId: linkedEventId,
+                occurrenceDate: normalized.date,
+                date: normalized.date,
+                startTime: '16:45',
+                endTime: minutesToTime(timeToMinutes('16:45') + mins),
+                actualMinutes: mins,
+                status: 'completed',
+                category: 'fitness',
+                subcategory: 'Conditioning & cardio',
+                title,
+                ...(normalized.notes ? { notes: normalized.notes } : {}),
+                createdAt: nowIso,
+                updatedAt: nowIso,
+              };
+          activityRecords = targetRec
+            ? prev.activityRecords.map((r) =>
+                r.id === targetRec.id ? nextRec : r
+              )
+            : [nextRec, ...prev.activityRecords];
+          runCloudOp((uid) =>
+            syncDoc(
+              uid,
+              'activityRecords',
+              nextRec.id,
+              nextRec as unknown as Record<string, unknown>
+            )
+          );
+        }
+
+        return { ...prev, cardioLogs, activityRecords };
+      });
+      runCloudOp((uid) =>
+        syncDoc(
+          uid,
+          'cardioLogs',
+          normalized.id,
+          normalized as unknown as Record<string, unknown>
+        )
+      );
+      showToast('Cardio session logged');
+    },
+    [runCloudOp, showToast]
+  );
+
+  const deleteCardioLog = useCallback(
+    (id: string) => {
+      setState((prev) => ({
+        ...prev,
+        cardioLogs: prev.cardioLogs.filter((c) => c.id !== id),
+      }));
+      runCloudOp((uid) => removeDoc(uid, 'cardioLogs', id));
+      showToast('Cardio log removed');
+    },
+    [runCloudOp, showToast]
+  );
+
+  const updateFitnessConfig = useCallback(
+    (patch: Partial<FitnessConfig>) => {
+      setState((prev) => {
+        const nextConfig: FitnessConfig = {
+          ...prev.fitnessConfig,
+          ...patch,
+        };
+        runCloudOp((uid) => syncFitnessConfig(uid, nextConfig));
+        return { ...prev, fitnessConfig: nextConfig };
+      });
+    },
+    [runCloudOp]
+  );
+
+  const logDailyProtein = useCallback(
+    (date: string, grams: number | null) => {
+      setState((prev) => {
+        const nextLogs = { ...prev.fitnessConfig.dailyProteinLogs };
+        if (grams === null || Number.isNaN(grams) || grams <= 0) {
+          delete nextLogs[date];
+        } else {
+          nextLogs[date] = Math.round(grams);
+        }
+        const nextConfig: FitnessConfig = {
+          ...prev.fitnessConfig,
+          dailyProteinLogs: nextLogs,
+        };
+        runCloudOp((uid) => syncFitnessConfig(uid, nextConfig));
+        return { ...prev, fitnessConfig: nextConfig };
+      });
+    },
+    [runCloudOp]
+  );
+
+  const upsertBeholdWeek = useCallback(
+    (week: BeholdWeekItem) => {
+      const normalized: BeholdWeekItem = {
+        ...week,
+        updatedAt: new Date().toISOString(),
+      };
+      setState((prev) => {
+        const exists = prev.beholdWeeks.some((b) => b.id === normalized.id);
+        return {
+          ...prev,
+          beholdWeeks: exists
+            ? prev.beholdWeeks.map((b) =>
+                b.id === normalized.id ? normalized : b
+              )
+            : [...prev.beholdWeeks, normalized],
+        };
+      });
+      runCloudOp((uid) =>
+        syncDoc(
+          uid,
+          'beholdWeeks',
+          normalized.id,
+          normalized as unknown as Record<string, unknown>
+        )
+      );
+      showToast(`Saved Week ${normalized.weekNumber}: ${normalized.title}`);
+    },
+    [runCloudOp, showToast]
+  );
+
   const updateSettings = useCallback(
     (patch: Partial<AppSettings>) => {
       setState((prev) => {
         const nextSettings = { ...prev.settings, ...patch };
-        runCloudOp((uid) => syncWorkspaceSettings(uid, nextSettings));
+        runCloudOp((uid) =>
+          syncWorkspaceSettings(uid, nextSettings, prev.migrationMeta)
+        );
         return { ...prev, settings: nextSettings };
       });
     },
     [runCloudOp]
   );
 
-  const restoreState = useCallback(
-    (newState: AppState) => {
-      const merged = { ...INITIAL_STATE, ...newState };
-      setState(merged);
-      runCloudOp((uid) => saveFullWorkspaceToCloud(uid, merged));
-      showToast('Backup restored');
+  const applyImportedWorkspace = useCallback(
+    async (nextState: AppState, mode: ImportMergeMode): Promise<boolean> => {
+      if (!cloudUser || !cloudUser.emailVerified) return false;
+      setCloudSyncStatus('syncing');
+      try {
+        if (mode === 'replace-all') {
+          await replaceFullWorkspaceInCloud(cloudUser.uid, nextState);
+        } else {
+          await saveFullWorkspaceToCloud(cloudUser.uid, nextState);
+        }
+        setState(nextState);
+        saveUserCache(cloudUser.uid, nextState);
+        setCloudSyncStatus('synced');
+        setCloudError(null);
+        showToast('Personal workspace imported and synced');
+        return true;
+      } catch (err) {
+        console.error('Import cloud sync error:', err);
+        setCloudSyncStatus('error');
+        setCloudError('Could not save imported workspace to Firestore.');
+        showToast('Cloud import failed — existing data preserved');
+        return false;
+      }
     },
-    [runCloudOp, showToast]
+    [cloudUser, showToast]
   );
 
-  const resetDemoData = useCallback(() => {
-    const fresh = resetLocalState();
-    setState(fresh);
-    runCloudOp((uid) => saveFullWorkspaceToCloud(uid, fresh));
-    showToast('Reset to initial schedule');
-  }, [runCloudOp, showToast]);
+  const resetWorkspaceToEmpty = useCallback(async () => {
+    const empty = createEmptyState();
+    if (cloudUser && cloudUser.emailVerified) {
+      setCloudSyncStatus('syncing');
+      try {
+        await replaceFullWorkspaceInCloud(cloudUser.uid, empty);
+        setState(empty);
+        saveUserCache(cloudUser.uid, empty);
+        setCloudSyncStatus('synced');
+        showToast('Workspace reset to empty');
+      } catch (err) {
+        console.error('Reset workspace error:', err);
+        setCloudSyncStatus('error');
+        showToast('Could not reset cloud workspace');
+      }
+    } else {
+      setState(empty);
+      showToast('Workspace reset to empty');
+    }
+  }, [cloudUser, showToast]);
 
   const loadDemoSampleLogs = useCallback(() => {
     const today = getLondonNow().date;
@@ -1055,8 +1942,8 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
           status: 'completed',
           category: 'behold',
           subcategory: 'Editing',
-          title: 'Video editing (sample)',
-          project: 'Portfolio Film',
+          title: 'Focus session (sample)',
+          project: 'Sample Project',
           isDemoData: true,
           createdAt: nowIso,
           updatedAt: nowIso,
@@ -1182,8 +2069,11 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
       const pendingToday = state.habits.filter(
         (h) =>
           !h.paused &&
+          !h.archived &&
           h.frequency === 'daily' &&
-          !state.habitLogs.some((l) => l.habitId === h.id && l.date === now.date)
+          !state.habitLogs.some(
+            (l) => l.habitId === h.id && l.date === now.date && l.status !== 'starter'
+          )
       );
       if (pendingToday.length > 0) {
         items.push({
@@ -1191,7 +2081,7 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
           type: 'habit',
           title: 'Daily habit check-in',
           detail: `${pendingToday.length} daily habit${pendingToday.length > 1 ? 's' : ''} remaining today.`,
-          actionSection: 'track',
+          actionSection: 'habits',
         });
       }
     }
@@ -1241,15 +2131,23 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
         state,
         activeSection,
         setActiveSection,
+        pillarTab,
+        setPillarTab,
+        openPillar,
         isDark,
         toast,
         showToast,
         storageError,
         cloudUser,
+        cloudAuthReady,
         cloudLoading,
+        cloudError,
         cloudSyncStatus,
         signInCloud,
         signOutCloud,
+        legacyBackupInfo,
+        refreshLegacyBackupInfo,
+        clearDetectedLegacyBackup,
         now,
         reminders,
         getCategoryMeta,
@@ -1273,15 +2171,31 @@ export const LifeHQProvider: React.FC<{ children: React.ReactNode }> = ({
         postponePriority,
         deletePriority,
         setHabitStatus,
+        logStarterAttempt,
+        clearStarterAttempt,
+        updateHabitStack,
         toggleHabitPause,
+        toggleHabitArchive,
         addHabit,
+        upsertHabit,
+        deleteHabit,
         toggleMilestone,
         upsertGoal,
         deleteGoal,
         saveWeeklyReview,
+        upsertDevotionEntry,
+        upsertBibleStudy,
+        deleteBibleStudy,
+        upsertWorkoutLog,
+        deleteWorkoutLog,
+        upsertCardioLog,
+        deleteCardioLog,
+        updateFitnessConfig,
+        logDailyProtein,
+        upsertBeholdWeek,
         updateSettings,
-        restoreState,
-        resetDemoData,
+        applyImportedWorkspace,
+        resetWorkspaceToEmpty,
         loadDemoSampleLogs,
         clearDemoLogs,
       }}
